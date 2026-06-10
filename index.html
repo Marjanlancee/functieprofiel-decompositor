@@ -112,31 +112,20 @@ const NIVEAU = {
   Expert:{kleur:"#fce4e4",tekst:"#9b2226",border:"#e07070",dot:"#9b2226",desc:"Strategisch, begeleidt anderen"},
 };
 function buildPrompt(bedrijf,eigen,escoSample){
-  const eigenBlok = eigen.trim() ? `\nHet bedrijf heet: ${bedrijf||"onbekend"}.\nEigen competentietaal (markeer met "eigen":true):\n${eigen}\n` : "";
-  const escoBlok = escoSample ? `\nVERPLICHT: Gebruik UITSLUITEND skillnamen uit de ESCO-database. Voorbeeldskills: ${escoSample}\n` : "";
-  return `Je bent een functie-taak- en skillsanalist.
-
-WERKWIJZE:
-
-STAP 1 – Functie herkennen
-Analyseer het functieprofiel. Bepaal de meest waarschijnlijke functietitel, vergelijkbare functietitels, synoniemen en de sector.
-
-STAP 2 – Taken verrijken
-Gebruik het functieprofiel en je kennis van vergelijkbare functies om een complete takenlijst samen te stellen van 8-12 taken. Denk aan dagelijkse, wekelijkse, administratieve, communicatieve, technische, controlerende en voorbereidende taken. Geef bij elke taak aan of deze uit het functieprofiel komt of aangevuld is.
-
-STAP 3 – Taken prioriteren
-Beoordeel elke taak op: frequentie (dagelijks/wekelijks/maandelijks/incidenteel), belang (hoog/middel/laag), vakmanschap (hoog/middel/laag).
-
-STAP 4 – ESCO-skills koppelen
-${escoBlok}
-Voor elke taak: zoek de best passende ESCO-skill(s). Gebruik alleen skills die exact voorkomen in de ESCO-database. Koppel maximaal 3 skills per taak. Geef altijd de exacte skillnaam, ESCO-code (8 tekens) en een korte toelichting.
+  const eigenBlok = eigen.trim() ? `\nHet bedrijf heet: ${bedrijf||"onbekend"}. Eigen competentietaal (markeer met "eigen":true): ${eigen}\n` : "";
+  const escoBlok = escoSample ? `Gebruik bij voorkeur skillnamen uit de ESCO-taxonomie. Voorbeeldskills: ${escoSample.slice(0,500)}` : "";
+  return `Je bent een expert in functie-analyse en skills-based werken.
 ${eigenBlok}
-KRITISCH BELANGRIJK: Geef ALLEEN het JSON-object terug. Geen tekst ervoor, geen tekst erna, geen uitleg, geen markdown, geen backticks. Begin direct met { en eindig met }. VERPLICHT formaat:
-{"functietitel":"string","samenvatting":"string","vergelijkbare_titels":["string"],"taken":[{"id":1,"taak":"string","bron":"functieprofiel|aangevuld|beide","frequentie":"dagelijks|wekelijks|maandelijks|incidenteel","belang":"hoog|middel|laag","vakmanschap":"hoog|middel|laag","taak_skills":[{"skill":"string","esco_code":"string","niveau":"Basis|Gevorderd|Expert","toelichting":"string","eigen":false}],"generieke_competenties":[{"competentie":"string","toelichting":"string","eigen":false}]}],"kerncompetenties":[{"competentie":"string","definitie":"string","eigen":false}]}
+Analyseer het functieprofiel en genereer:
+- 8-12 taken (actief geformuleerd, specifiek)
+- Per taak: frequentie, belang en vakmanschap
+- Per taak: 2-3 ESCO-skills met code en toelichting
+- 4-5 kerncompetenties
+${escoBlok}
 
-Genereer 8-12 taken. Per taak: 2-3 ESCO-skills, 2-3 generieke competenties. Kerncompetenties: 4-5 stuks.
-Basis=uitvoerend/begeleiding, Gevorderd=zelfstandig/complex, Expert=strategisch/begeleidt.
-eigen:true alleen als uit eigen competentietaal.`;
+GEEF ALLEEN GELDIG JSON TERUG. Geen uitleg, geen markdown, geen backticks. Begin met { en eindig met }.
+
+{"functietitel":"string","samenvatting":"string","vergelijkbare_titels":["string"],"taken":[{"id":1,"taak":"string","bron":"functieprofiel","frequentie":"dagelijks","belang":"hoog","vakmanschap":"hoog","taak_skills":[{"skill":"string","esco_code":"string","niveau":"Basis","toelichting":"string","eigen":false}],"generieke_competenties":[{"competentie":"string","toelichting":"string","eigen":false}]}],"kerncompetenties":[{"competentie":"string","definitie":"string","eigen":false}]}`;
 }
 function extractJSON(text){
   try{return JSON.parse(text.trim())}catch{}
@@ -393,4 +382,4 @@ fetch('/esco_skills.json')
   .catch(e => console.log('ESCO niet geladen:', e));
 </script>
 </body>
-</html>  
+</html> 
