@@ -189,7 +189,7 @@ function App(){
       const data=await res.json();
       const text=(data.content||[]).map(i=>i.text||"").join("");
       setResult(extractJSON(text));setTab("taken");
-    }catch(e){setError(e.message||"Analyse mislukt");}
+    }catch(e){setError(e.message||"Analyse mislukt"); console.error('Raw response:', e);}
     finally{setLoading(false);}
   };
   const exportPDF=()=>{
