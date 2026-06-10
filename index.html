@@ -112,20 +112,25 @@ const NIVEAU = {
   Expert:{kleur:"#fce4e4",tekst:"#9b2226",border:"#e07070",dot:"#9b2226",desc:"Strategisch, begeleidt anderen"},
 };
 function buildPrompt(bedrijf,eigen,escoSample){
-  const eigenBlok = eigen.trim() ? `\nHet bedrijf heet: ${bedrijf||"onbekend"}. Eigen competentietaal (markeer met "eigen":true): ${eigen}\n` : "";
-  const escoBlok = escoSample ? `Gebruik ESCO-skillnamen waar mogelijk. Enkele voorbeelden: ${escoSample.slice(0,300)}` : "";
+  const eigenBlok = eigen.trim() ? `\nHet bedrijf heet: ${bedrijf||"onbekend"}. Eigen competentietaal (markeer met "eigen":true): ${eigen}` : "";
   return `Je bent een expert in functie-analyse en skills-based werken.
+Je krijgt een functieprofiel en genereert een gestructureerde breakdown.
 ${eigenBlok}
-Analyseer het functieprofiel en genereer:
-- 8-12 taken (actief geformuleerd, specifiek)
-- Per taak: frequentie, belang en vakmanschap
-- Per taak: 2-3 ESCO-skills met code en toelichting
+
+GEEF ALLEEN GELDIG JSON TERUG. Geen uitleg, geen markdown, geen backticks. Begin direct met { en eindig met }.
+
+Formaat:
+{"functietitel":"string","samenvatting":"string","vergelijkbare_titels":["string"],"taken":[{"id":1,"taak":"string","bron":"functieprofiel","frequentie":"dagelijks","belang":"hoog","vakmanschap":"hoog","taak_skills":[{"skill":"Nederlandse ESCO skillnaam","esco_code":"8tekens","niveau":"Basis|Gevorderd|Expert","toelichting":"kort","eigen":false}],"generieke_competenties":[{"competentie":"string","toelichting":"string","eigen":false}]}],"kerncompetenties":[{"competentie":"string","definitie":"string","eigen":false}]}
+
+Regels:
+- 6-8 taken, actief geformuleerd
+- Per taak: 2-3 skills, 2-3 competenties
 - 4-5 kerncompetenties
-${escoBlok}
-
-GEEF ALLEEN GELDIG JSON TERUG. Geen uitleg, geen markdown, geen backticks. Begin met { en eindig met }.
-
-{"functietitel":"string","samenvatting":"string","vergelijkbare_titels":["string"],"taken":[{"id":1,"taak":"string","bron":"functieprofiel","frequentie":"dagelijks","belang":"hoog","vakmanschap":"hoog","taak_skills":[{"skill":"string","esco_code":"string","niveau":"Basis","toelichting":"string","eigen":false}],"generieke_competenties":[{"competentie":"string","toelichting":"string","eigen":false}]}],"kerncompetenties":[{"competentie":"string","definitie":"string","eigen":false}]}`;
+- bron: "functieprofiel", "aangevuld" of "beide"
+- frequentie: dagelijks, wekelijks, maandelijks of incidenteel
+- belang en vakmanschap: hoog, middel of laag
+- esco_code: 8 tekens uit de ESCO-taxonomie
+- Basis=uitvoerend, Gevorderd=zelfstandig, Expert=strategisch`;
 }
 function extractJSON(text){
   try{return JSON.parse(text.trim())}catch{}
@@ -152,6 +157,27 @@ function extractJSON(text){
   }
   throw new Error("Kon geen geldig JSON vinden");
 }
+function findEscoMatch(skillName) {
+  if (!window.escoData || !skillName) return null;
+  const query = skillName.toLowerCase().trim();
+  // Exact match first
+  let match = window.escoData.find(s => s[0].toLowerCase() === query);
+  if (match) return { label: match[0], code: match[1] };
+  // Partial match
+  match = window.escoData.find(s => s[0].toLowerCase().includes(query) || query.includes(s[0].toLowerCase()));
+  if (match) return { label: match[0], code: match[1] };
+  // Word overlap match
+  const words = query.split(' ').filter(w => w.length > 3);
+  let best = null, bestScore = 0;
+  for (const s of window.escoData) {
+    const sl = s[0].toLowerCase();
+    const score = words.filter(w => sl.includes(w)).length;
+    if (score > bestScore) { bestScore = score; best = s; }
+  }
+  if (bestScore > 0 && best) return { label: best[0], code: best[1] };
+  return null;
+}
+
 function EigenBadge(){return <span className="eib">Eigen</span>}
 function App(){
   const [bedrijf,setBedrijf]=useState("");
@@ -188,7 +214,18 @@ function App(){
       if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(`API fout ${res.status}: ${e?.error?.message||res.statusText}`);}
       const data=await res.json();
       const text=(data.content||[]).map(i=>i.text||"").join("");
-      setResult(extractJSON(text));setTab("taken");
+      const parsed = extractJSON(text);
+      // Enrich skills with ESCO matches from local database
+      if (window.escoData && parsed.taken) {
+        parsed.taken = parsed.taken.map(t => ({
+          ...t,
+          taak_skills: (t.taak_skills||[]).map(s => {
+            const match = findEscoMatch(s.skill);
+            return match ? { ...s, skill: match.label, esco_code: match.code } : s;
+          })
+        }));
+      }
+      setResult(parsed);setTab("taken");
     }catch(e){setError(e.message||"Analyse mislukt"); console.error('Raw response:', e);}
     finally{setLoading(false);}
   };
@@ -382,4 +419,4 @@ fetch('/esco_skills.json')
   .catch(e => console.log('ESCO niet geladen:', e));
 </script>
 </body>
-</html> 
+</html>
