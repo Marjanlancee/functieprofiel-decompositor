@@ -131,7 +131,7 @@ STAP 4 – ESCO-skills koppelen
 ${escoBlok}
 Voor elke taak: zoek de best passende ESCO-skill(s). Gebruik alleen skills die exact voorkomen in de ESCO-database. Koppel maximaal 3 skills per taak. Geef altijd de exacte skillnaam, ESCO-code (8 tekens) en een korte toelichting.
 ${eigenBlok}
-VERPLICHT JSON-formaat (geen tekst, geen markdown, geen backticks):
+KRITISCH BELANGRIJK: Geef ALLEEN het JSON-object terug. Geen tekst ervoor, geen tekst erna, geen uitleg, geen markdown, geen backticks. Begin direct met { en eindig met }. VERPLICHT formaat:
 {"functietitel":"string","samenvatting":"string","vergelijkbare_titels":["string"],"taken":[{"id":1,"taak":"string","bron":"functieprofiel|aangevuld|beide","frequentie":"dagelijks|wekelijks|maandelijks|incidenteel","belang":"hoog|middel|laag","vakmanschap":"hoog|middel|laag","taak_skills":[{"skill":"string","esco_code":"string","niveau":"Basis|Gevorderd|Expert","toelichting":"string","eigen":false}],"generieke_competenties":[{"competentie":"string","toelichting":"string","eigen":false}]}],"kerncompetenties":[{"competentie":"string","definitie":"string","eigen":false}]}
 
 Genereer 8-12 taken. Per taak: 2-3 ESCO-skills, 2-3 generieke competenties. Kerncompetenties: 4-5 stuks.
@@ -143,7 +143,24 @@ function extractJSON(text){
   const s=text.replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/i,"").trim();
   try{return JSON.parse(s)}catch{}
   const a=text.indexOf("{"),b=text.lastIndexOf("}");
-  if(a!==-1&&b!==-1)try{return JSON.parse(text.slice(a,b+1))}catch{}
+  if(a!==-1&&b!==-1){
+    try{return JSON.parse(text.slice(a,b+1))}catch{}
+    // Try to fix truncated JSON by finding largest valid subset
+    let attempt = text.slice(a,b+1);
+    try{return JSON.parse(attempt)}catch(e){
+      // Remove trailing incomplete parts
+      const lastComma = attempt.lastIndexOf(",");
+      if(lastComma>0){
+        let fixed = attempt.slice(0,lastComma);
+        // Close all open brackets
+        let opens = (fixed.match(/\[/g)||[]).length - (fixed.match(/\]/g)||[]).length;
+        let openb = (fixed.match(/\{/g)||[]).length - (fixed.match(/\}/g)||[]).length;
+        for(let i=0;i<opens;i++) fixed += "]";
+        for(let i=0;i<openb;i++) fixed += "}";
+        try{return JSON.parse(fixed)}catch{}
+      }
+    }
+  }
   throw new Error("Kon geen geldig JSON vinden");
 }
 function EigenBadge(){return <span className="eib">Eigen</span>}
@@ -177,7 +194,7 @@ function App(){
     try{
       const res=await fetch("/api/proxy",{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:4000,system:buildPrompt(bedrijf,eigenTaal,window.escoSample||""),messages:[{role:"user",content:`Analyseer dit functieprofiel:\n\n${input}`}]})
+        body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:6000,system:buildPrompt(bedrijf,eigenTaal,window.escoSample||""),messages:[{role:"user",content:`Analyseer dit functieprofiel:\n\n${input}`}]})
       });
       if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(`API fout ${res.status}: ${e?.error?.message||res.statusText}`);}
       const data=await res.json();
@@ -376,4 +393,4 @@ fetch('/esco_skills.json')
   .catch(e => console.log('ESCO niet geladen:', e));
 </script>
 </body>
-</html>
+</html>  
