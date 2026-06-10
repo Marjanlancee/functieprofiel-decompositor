@@ -154,7 +154,7 @@ function App(){
     try{
       const res=await fetch("/api/proxy",{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:4000,system:buildPrompt(bedrijf,eigenTaal),messages:[{role:"user",content:`Analyseer dit functieprofiel:\n\n${input}`}]})
+        body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:4000,system:buildPrompt(bedrijf,eigenTaal),messages:[{role:"user",content:`Analyseer dit functieprofiel:\n\n${input}`}]})
       });
       if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(`API fout ${res.status}: ${e?.error?.message||res.statusText}`);}
       const data=await res.json();
@@ -327,4 +327,4 @@ function App(){
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
 </body>
-</html>
+</html>  
