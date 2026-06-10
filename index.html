@@ -113,7 +113,7 @@ const NIVEAU = {
 };
 function buildPrompt(bedrijf,eigen,escoSample){
   const eigenBlok = eigen.trim() ? `\nHet bedrijf heet: ${bedrijf||"onbekend"}. Eigen competentietaal (markeer met "eigen":true): ${eigen}\n` : "";
-  const escoBlok = escoSample ? `Gebruik bij voorkeur skillnamen uit de ESCO-taxonomie. Voorbeeldskills: ${escoSample.slice(0,500)}` : "";
+  const escoBlok = escoSample ? `Gebruik ESCO-skillnamen waar mogelijk. Enkele voorbeelden: ${escoSample.slice(0,300)}` : "";
   return `Je bent een expert in functie-analyse en skills-based werken.
 ${eigenBlok}
 Analyseer het functieprofiel en genereer:
@@ -376,10 +376,10 @@ fetch('/esco_skills.json')
     window.escoData = data;
     // Create a sample of 200 random skills for the prompt hint
     const shuffled = [...data].sort(() => Math.random() - 0.5).slice(0, 200);
-    window.escoSample = shuffled.map(s => s[0] + ' (' + s[1] + ')').join(', ');
+    window.escoSample = shuffled.slice(0,50).map(s => s[0]).join(', ');
     console.log('ESCO geladen:', data.length, 'skills');
   })
   .catch(e => console.log('ESCO niet geladen:', e));
 </script>
 </body>
-</html> 
+</html>
