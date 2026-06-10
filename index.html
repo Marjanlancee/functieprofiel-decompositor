@@ -111,73 +111,18 @@ const NIVEAU = {
   Gevorderd:{kleur:"#fef3d0",tekst:"#7a5c00",border:"#e8c96a",dot:"#c4860a",desc:"Zelfstandig, complexe situaties"},
   Expert:{kleur:"#fce4e4",tekst:"#9b2226",border:"#e07070",dot:"#9b2226",desc:"Strategisch, begeleidt anderen"},
 };
-function buildPrompt(bedrijf,eigen,escoSample){
-  const eigenBlok = eigen.trim() ? `\nHet bedrijf heet: ${bedrijf||"onbekend"}. Eigen competentietaal (markeer met "eigen":true): ${eigen}` : "";
-  return `Je bent een expert in functie-analyse en skills-based werken.
-Je krijgt een functieprofiel en genereert een gestructureerde breakdown.
-${eigenBlok}
-
-GEEF ALLEEN GELDIG JSON TERUG. Geen uitleg, geen markdown, geen backticks. Begin direct met { en eindig met }.
-
-Formaat:
-{"functietitel":"string","samenvatting":"string","vergelijkbare_titels":["string"],"taken":[{"id":1,"taak":"string","bron":"functieprofiel","frequentie":"dagelijks","belang":"hoog","vakmanschap":"hoog","taak_skills":[{"skill":"Nederlandse ESCO skillnaam","esco_code":"8tekens","niveau":"Basis|Gevorderd|Expert","toelichting":"kort","eigen":false}],"generieke_competenties":[{"competentie":"string","toelichting":"string","eigen":false}]}],"kerncompetenties":[{"competentie":"string","definitie":"string","eigen":false}]}
-
-Regels:
-- 6-8 taken, actief geformuleerd
-- Per taak: 2-3 skills, 2-3 competenties
-- 4-5 kerncompetenties
-- bron: "functieprofiel", "aangevuld" of "beide"
-- frequentie: dagelijks, wekelijks, maandelijks of incidenteel
-- belang en vakmanschap: hoog, middel of laag
-- esco_code: 8 tekens uit de ESCO-taxonomie
-- Basis=uitvoerend, Gevorderd=zelfstandig, Expert=strategisch`;
+function buildPrompt(bedrijf,eigen){
+  const blok=eigen.trim()?`\nHet bedrijf heet: ${bedrijf||"onbekend"}.\nEigen competentietaal (markeer met "eigen":true):\n${eigen}\n`:"";
+  return `Je bent een expert in functie-analyse en skills-based werken. Je krijgt een functieprofiel en genereert een breakdown.${blok}\nGeef ALLEEN geldig JSON terug. Geen tekst, geen markdown, geen backticks.\n{"functietitel":"string","samenvatting":"string","taken":[{"id":1,"taak":"string","taak_skills":[{"skill":"string","niveau":"Basis|Gevorderd|Expert","esco_label":"string","eigen":false}],"generieke_competenties":[{"competentie":"string","toelichting":"string","eigen":false}]}],"kerncompetenties":[{"competentie":"string","definitie":"string","eigen":false}]}\n5-8 taken, 2-4 skills, 2-3 comp, 4-5 kerncomp. eigen:true alleen als uit eigen competentietaal.`;
 }
 function extractJSON(text){
   try{return JSON.parse(text.trim())}catch{}
   const s=text.replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/i,"").trim();
   try{return JSON.parse(s)}catch{}
   const a=text.indexOf("{"),b=text.lastIndexOf("}");
-  if(a!==-1&&b!==-1){
-    try{return JSON.parse(text.slice(a,b+1))}catch{}
-    // Try to fix truncated JSON by finding largest valid subset
-    let attempt = text.slice(a,b+1);
-    try{return JSON.parse(attempt)}catch(e){
-      // Remove trailing incomplete parts
-      const lastComma = attempt.lastIndexOf(",");
-      if(lastComma>0){
-        let fixed = attempt.slice(0,lastComma);
-        // Close all open brackets
-        let opens = (fixed.match(/\[/g)||[]).length - (fixed.match(/\]/g)||[]).length;
-        let openb = (fixed.match(/\{/g)||[]).length - (fixed.match(/\}/g)||[]).length;
-        for(let i=0;i<opens;i++) fixed += "]";
-        for(let i=0;i<openb;i++) fixed += "}";
-        try{return JSON.parse(fixed)}catch{}
-      }
-    }
-  }
+  if(a!==-1&&b!==-1)try{return JSON.parse(text.slice(a,b+1))}catch{}
   throw new Error("Kon geen geldig JSON vinden");
 }
-function findEscoMatch(skillName) {
-  if (!window.escoData || !skillName) return null;
-  const query = skillName.toLowerCase().trim();
-  // Exact match first
-  let match = window.escoData.find(s => s[0].toLowerCase() === query);
-  if (match) return { label: match[0], code: match[1] };
-  // Partial match
-  match = window.escoData.find(s => s[0].toLowerCase().includes(query) || query.includes(s[0].toLowerCase()));
-  if (match) return { label: match[0], code: match[1] };
-  // Word overlap match
-  const words = query.split(' ').filter(w => w.length > 3);
-  let best = null, bestScore = 0;
-  for (const s of window.escoData) {
-    const sl = s[0].toLowerCase();
-    const score = words.filter(w => sl.includes(w)).length;
-    if (score > bestScore) { bestScore = score; best = s; }
-  }
-  if (bestScore > 0 && best) return { label: best[0], code: best[1] };
-  return null;
-}
-
 function EigenBadge(){return <span className="eib">Eigen</span>}
 function App(){
   const [bedrijf,setBedrijf]=useState("");
@@ -209,24 +154,13 @@ function App(){
     try{
       const res=await fetch("/api/proxy",{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:6000,system:buildPrompt(bedrijf,eigenTaal,window.escoSample||""),messages:[{role:"user",content:`Analyseer dit functieprofiel:\n\n${input}`}]})
+        body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:4000,system:buildPrompt(bedrijf,eigenTaal),messages:[{role:"user",content:`Analyseer dit functieprofiel:\n\n${input}`}]})
       });
       if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(`API fout ${res.status}: ${e?.error?.message||res.statusText}`);}
       const data=await res.json();
       const text=(data.content||[]).map(i=>i.text||"").join("");
-      const parsed = extractJSON(text);
-      // Enrich skills with ESCO matches from local database
-      if (window.escoData && parsed.taken) {
-        parsed.taken = parsed.taken.map(t => ({
-          ...t,
-          taak_skills: (t.taak_skills||[]).map(s => {
-            const match = findEscoMatch(s.skill);
-            return match ? { ...s, skill: match.label, esco_code: match.code } : s;
-          })
-        }));
-      }
-      setResult(parsed);setTab("taken");
-    }catch(e){setError(e.message||"Analyse mislukt"); console.error('Raw response:', e);}
+      setResult(extractJSON(text));setTab("taken");
+    }catch(e){setError(e.message||"Analyse mislukt");}
     finally{setLoading(false);}
   };
   const exportPDF=()=>{
@@ -300,7 +234,6 @@ function App(){
               <span><strong>{result.taken.length}</strong>&nbsp;taken</span>
               <span><strong>{allSkills.length}</strong>&nbsp;skills</span>
               <span><strong>{result.kerncompetenties.length}</strong>&nbsp;kerncompetenties</span>
-              {result.vergelijkbare_titels&&result.vergelijkbare_titels.length>0&&<span style={{fontSize:10,color:"var(--muted)"}}>Ook bekend als: {result.vergelijkbare_titels.join(" · ")}</span>}
               {changedCount>0&&<span className="changed-badge">✎ {changedCount} aangepast</span>}
               {heeftEigen&&<span className="eigen-badge-sm">Eigen taal actief</span>}
             </div>
@@ -316,12 +249,6 @@ function App(){
                   <div className="tnum">{String(t.id).padStart(2,"0")}</div>
                   <div className="tbody">
                     <div className="tname">{t.taak}</div>
-                            {expandedTask===i&&<div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:4}}>
-                              {t.bron&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:2,background:"#e8f0fe",color:"#1a56db",border:"1px solid #93b4fd"}}>{t.bron}</span>}
-                              {t.frequentie&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:2,background:"var(--bg)",color:"var(--muted)",border:"1px solid var(--border)"}}>{t.frequentie}</span>}
-                              {t.belang&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:2,background: t.belang==="hoog"?"#fce4e4":t.belang==="middel"?"#fef3d0":"#d8f3dc",color:t.belang==="hoog"?"#9b2226":t.belang==="middel"?"#7a5c00":"#2d6a4f",border:"1px solid",borderColor:t.belang==="hoog"?"#e07070":t.belang==="middel"?"#e8c96a":"#74c69d"}}>belang: {t.belang}</span>}
-                              {t.vakmanschap&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:2,background:"var(--bg)",color:"var(--muted)",border:"1px solid var(--border)"}}>vakmanschap: {t.vakmanschap}</span>}
-                            </div>}
                     {!open&&<div className="pills">{t.taak_skills.slice(0,3).map(s=>{const n=getNiveau(t.id,s.skill,s.niveau);const d=D[n];return <span key={s.skill} className="pill" style={{background:s.eigen?"#f3e8ff":d.kleur,color:s.eigen?"#6b21a8":d.tekst,borderColor:s.eigen?"#c084fc":d.border}}><span className="pd" style={{background:s.eigen?"#c084fc":d.dot}}/>{s.skill}</span>;})}
                     {t.taak_skills.length>3&&<span className="pill" style={{borderColor:"var(--border)",color:"var(--muted)"}}>+{t.taak_skills.length-3}</span>}</div>}
                   </div>
@@ -336,12 +263,7 @@ function App(){
                       return <div key={s.skill} className="skill-editor" style={{borderColor:s.eigen?"#c084fc":"var(--border)"}}>
                         <div className="skill-editor-top">
                           <span className="pd" style={{background:s.eigen?"#c084fc":d.dot,width:7,height:7}}/>
-                          <div className="skill-editor-name">
-                                        {s.skill}{s.eigen&&<EigenBadge/>}
-                                        {s.esco_code&&<span className="eb">ESCO: {s.esco_code}</span>}
-                                        {changed&&<span className="was-changed">(was: {s.niveau})</span>}
-                                        {s.toelichting&&<div style={{fontSize:10,color:"var(--muted)",marginTop:2}}>{s.toelichting}</div>}
-                                      </div>
+                          <div className="skill-editor-name">{s.skill}{s.eigen&&<EigenBadge/>}{!s.eigen&&s.esco_label&&<span className="eb">ESCO: {s.esco_label}</span>}{changed&&<span className="was-changed">(was: {s.niveau})</span>}</div>
                           <span className="skill-editor-badge" style={{background:d.kleur,color:d.tekst,borderColor:d.border}}>{cur}</span>
                         </div>
                         <div>
@@ -404,19 +326,6 @@ function App(){
   </>;
 }
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
-</script>
-<script>
-// Load ESCO skills database
-fetch('/esco_skills.json')
-  .then(r => r.json())
-  .then(data => {
-    window.escoData = data;
-    // Create a sample of 200 random skills for the prompt hint
-    const shuffled = [...data].sort(() => Math.random() - 0.5).slice(0, 200);
-    window.escoSample = shuffled.slice(0,50).map(s => s[0]).join(', ');
-    console.log('ESCO geladen:', data.length, 'skills');
-  })
-  .catch(e => console.log('ESCO niet geladen:', e));
 </script>
 </body>
 </html>
