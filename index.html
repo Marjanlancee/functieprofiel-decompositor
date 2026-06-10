@@ -112,9 +112,31 @@ const NIVEAU = {
   Expert:{kleur:"#fce4e4",tekst:"#9b2226",border:"#e07070",dot:"#9b2226",desc:"Strategisch, begeleidt anderen"},
 };
 function buildPrompt(bedrijf,eigen,escoSample){
-  const escoHint = escoSample ? `\nJe hebt toegang tot de volledige ESCO-taxonomie in het Nederlands. Gebruik UITSLUITEND skillnamen die exact overeenkomen met een van de volgende ESCO-labels (of zo dicht mogelijk bij). Geef ook altijd de exacte ESCO-code mee (8 tekens).\nVoorbeeldskills uit ESCO: ${escoSample}\n` : "";
-  const blok=eigen.trim()?`\nHet bedrijf heet: ${bedrijf||"onbekend"}.\nEigen competentietaal (markeer met "eigen":true):\n${eigen}\n`:"";
-  return `Je bent een expert in functie-analyse en skills-based werken. Je krijgt een functieprofiel en genereert een breakdown.${blok}\nGeef ALLEEN geldig JSON terug. Geen tekst, geen markdown, geen backticks.\n{"functietitel":"string","samenvatting":"string","taken":[{"id":1,"taak":"string","taak_skills":[{"skill":"string","niveau":"Basis|Gevorderd|Expert","esco_label":"string","esco_code":"string","eigen":false}],"generieke_competenties":[{"competentie":"string","toelichting":"string","eigen":false}]}],"kerncompetenties":[{"competentie":"string","definitie":"string","eigen":false}]}\n5-8 taken, 2-4 skills, 2-3 comp, 4-5 kerncomp. eigen:true alleen als uit eigen competentietaal.`;
+  const eigenBlok = eigen.trim() ? `\nHet bedrijf heet: ${bedrijf||"onbekend"}.\nEigen competentietaal (markeer met "eigen":true):\n${eigen}\n` : "";
+  const escoBlok = escoSample ? `\nVERPLICHT: Gebruik UITSLUITEND skillnamen uit de ESCO-database. Voorbeeldskills: ${escoSample}\n` : "";
+  return `Je bent een functie-taak- en skillsanalist.
+
+WERKWIJZE:
+
+STAP 1 – Functie herkennen
+Analyseer het functieprofiel. Bepaal de meest waarschijnlijke functietitel, vergelijkbare functietitels, synoniemen en de sector.
+
+STAP 2 – Taken verrijken
+Gebruik het functieprofiel en je kennis van vergelijkbare functies om een complete takenlijst samen te stellen van 8-12 taken. Denk aan dagelijkse, wekelijkse, administratieve, communicatieve, technische, controlerende en voorbereidende taken. Geef bij elke taak aan of deze uit het functieprofiel komt of aangevuld is.
+
+STAP 3 – Taken prioriteren
+Beoordeel elke taak op: frequentie (dagelijks/wekelijks/maandelijks/incidenteel), belang (hoog/middel/laag), vakmanschap (hoog/middel/laag).
+
+STAP 4 – ESCO-skills koppelen
+${escoBlok}
+Voor elke taak: zoek de best passende ESCO-skill(s). Gebruik alleen skills die exact voorkomen in de ESCO-database. Koppel maximaal 3 skills per taak. Geef altijd de exacte skillnaam, ESCO-code (8 tekens) en een korte toelichting.
+${eigenBlok}
+VERPLICHT JSON-formaat (geen tekst, geen markdown, geen backticks):
+{"functietitel":"string","samenvatting":"string","vergelijkbare_titels":["string"],"taken":[{"id":1,"taak":"string","bron":"functieprofiel|aangevuld|beide","frequentie":"dagelijks|wekelijks|maandelijks|incidenteel","belang":"hoog|middel|laag","vakmanschap":"hoog|middel|laag","taak_skills":[{"skill":"string","esco_code":"string","niveau":"Basis|Gevorderd|Expert","toelichting":"string","eigen":false}],"generieke_competenties":[{"competentie":"string","toelichting":"string","eigen":false}]}],"kerncompetenties":[{"competentie":"string","definitie":"string","eigen":false}]}
+
+Genereer 8-12 taken. Per taak: 2-3 ESCO-skills, 2-3 generieke competenties. Kerncompetenties: 4-5 stuks.
+Basis=uitvoerend/begeleiding, Gevorderd=zelfstandig/complex, Expert=strategisch/begeleidt.
+eigen:true alleen als uit eigen competentietaal.`;
 }
 function extractJSON(text){
   try{return JSON.parse(text.trim())}catch{}
@@ -235,6 +257,7 @@ function App(){
               <span><strong>{result.taken.length}</strong>&nbsp;taken</span>
               <span><strong>{allSkills.length}</strong>&nbsp;skills</span>
               <span><strong>{result.kerncompetenties.length}</strong>&nbsp;kerncompetenties</span>
+              {result.vergelijkbare_titels&&result.vergelijkbare_titels.length>0&&<span style={{fontSize:10,color:"var(--muted)"}}>Ook bekend als: {result.vergelijkbare_titels.join(" · ")}</span>}
               {changedCount>0&&<span className="changed-badge">✎ {changedCount} aangepast</span>}
               {heeftEigen&&<span className="eigen-badge-sm">Eigen taal actief</span>}
             </div>
@@ -250,6 +273,12 @@ function App(){
                   <div className="tnum">{String(t.id).padStart(2,"0")}</div>
                   <div className="tbody">
                     <div className="tname">{t.taak}</div>
+                            {expandedTask===i&&<div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:4}}>
+                              {t.bron&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:2,background:"#e8f0fe",color:"#1a56db",border:"1px solid #93b4fd"}}>{t.bron}</span>}
+                              {t.frequentie&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:2,background:"var(--bg)",color:"var(--muted)",border:"1px solid var(--border)"}}>{t.frequentie}</span>}
+                              {t.belang&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:2,background: t.belang==="hoog"?"#fce4e4":t.belang==="middel"?"#fef3d0":"#d8f3dc",color:t.belang==="hoog"?"#9b2226":t.belang==="middel"?"#7a5c00":"#2d6a4f",border:"1px solid",borderColor:t.belang==="hoog"?"#e07070":t.belang==="middel"?"#e8c96a":"#74c69d"}}>belang: {t.belang}</span>}
+                              {t.vakmanschap&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:2,background:"var(--bg)",color:"var(--muted)",border:"1px solid var(--border)"}}>vakmanschap: {t.vakmanschap}</span>}
+                            </div>}
                     {!open&&<div className="pills">{t.taak_skills.slice(0,3).map(s=>{const n=getNiveau(t.id,s.skill,s.niveau);const d=D[n];return <span key={s.skill} className="pill" style={{background:s.eigen?"#f3e8ff":d.kleur,color:s.eigen?"#6b21a8":d.tekst,borderColor:s.eigen?"#c084fc":d.border}}><span className="pd" style={{background:s.eigen?"#c084fc":d.dot}}/>{s.skill}</span>;})}
                     {t.taak_skills.length>3&&<span className="pill" style={{borderColor:"var(--border)",color:"var(--muted)"}}>+{t.taak_skills.length-3}</span>}</div>}
                   </div>
@@ -264,7 +293,12 @@ function App(){
                       return <div key={s.skill} className="skill-editor" style={{borderColor:s.eigen?"#c084fc":"var(--border)"}}>
                         <div className="skill-editor-top">
                           <span className="pd" style={{background:s.eigen?"#c084fc":d.dot,width:7,height:7}}/>
-                          <div className="skill-editor-name">{s.skill}{s.eigen&&<EigenBadge/>}{!s.eigen&&s.esco_label&&<span className="eb">ESCO: {s.esco_label}</span>}{changed&&<span className="was-changed">(was: {s.niveau})</span>}</div>
+                          <div className="skill-editor-name">
+                                        {s.skill}{s.eigen&&<EigenBadge/>}
+                                        {s.esco_code&&<span className="eb">ESCO: {s.esco_code}</span>}
+                                        {changed&&<span className="was-changed">(was: {s.niveau})</span>}
+                                        {s.toelichting&&<div style={{fontSize:10,color:"var(--muted)",marginTop:2}}>{s.toelichting}</div>}
+                                      </div>
                           <span className="skill-editor-badge" style={{background:d.kleur,color:d.tekst,borderColor:d.border}}>{cur}</span>
                         </div>
                         <div>
