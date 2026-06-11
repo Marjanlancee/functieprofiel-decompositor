@@ -1,6 +1,5 @@
 // api/analyse.js — Functieprofiel Decompositor
-// ESCO Webservice API v1.2.0 geïntegreerd (live lookup per skill)
-// Vercel serverless function
+// ESCO Webservice API v1.2.0 — gecorrigeerde URI parsing via _links.self.uri
 
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
 const ESCO_API      = 'https://ec.europa.eu/esco/api';
@@ -20,7 +19,7 @@ async function escoZoekSkill(skillNaam, taal = 'nl') {
 
     const res = await fetch(`${ESCO_API}/search?${params}`, {
       headers: { Accept: 'application/json' },
-      signal: AbortSignal.timeout(4000), // 4 sec timeout per skill
+      signal: AbortSignal.timeout(5000),
     });
 
     if (!res.ok) return null;
@@ -31,22 +30,24 @@ async function escoZoekSkill(skillNaam, taal = 'nl') {
 
     const top = hits[0];
 
-    // URI bevat de ESCO-code (laatste deel na laatste /)
-    const uri        = top.uri ?? '';
-    const escoCode   = uri.split('/').pop() ?? null;
-    const score      = Math.round((top.score ?? 0.8) * 100);
+    // URI zit in _links.self.uri (HAL-formaat)
+    const uri = top?._links?.self?.uri ?? top?.uri ?? '';
 
-    // Preferredlabel in NL, fallback EN
-    const label =
-      top.preferredLabel?.nl ??
-      top.preferredLabel?.en ??
-      top.title ??
-      skillNaam;
+    // ESCO-code = UUID achter laatste / in de URI
+    // Voorbeeld URI: http://data.europa.eu/esco/skill/f168d5a7-...
+    const escoCode = uri ? uri.split('/').pop() : null;
+
+    // Score: ESCO geeft score terug als getal (0-1 of 0-100)
+    const rawScore = top.score ?? 0;
+    const score = rawScore > 1 ? Math.round(rawScore) : Math.round(rawScore * 100);
+
+    // Preferred label: title veld in gevraagde taal
+    const label = top.title ?? top?.preferredLabel?.[taal] ?? top?.preferredLabel?.en ?? skillNaam;
 
     // Definitie
     const definitie =
-      top.description?.nl?.literal ??
-      top.description?.en?.literal ??
+      top?.description?.[taal]?.literal ??
+      top?.description?.en?.literal ??
       null;
 
     return {
@@ -62,7 +63,6 @@ async function escoZoekSkill(skillNaam, taal = 'nl') {
   }
 }
 
-// Batch: alle skills tegelijk opzoeken (parallel, met fallback bij mislukking)
 async function verrijkSkillsMetEsco(skills, taal = 'nl') {
   const resultaten = await Promise.allSettled(
     skills.map(s => escoZoekSkill(s, taal))
@@ -104,9 +104,8 @@ async function vraagClaude(systeemPrompt, gebruikersBericht, apiKey) {
   const data = await res.json();
   const tekst = data.content?.[0]?.text ?? '';
 
-  // JSON extraheren (Claude omhult soms met ```json ... ```)
   const match = tekst.match(/```json\s*([\s\S]*?)\s*```/) ?? tekst.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
-  const jsonTekst = match ? match[1] ?? match[0] : tekst;
+  const jsonTekst = match ? (match[1] ?? match[0]) : tekst;
 
   try {
     return JSON.parse(jsonTekst);
@@ -183,7 +182,7 @@ Geef terug als JSON:
       "id": "T01",
       "hardskills": [
         {
-          "skill": "Exacte Nederlandse skilnaam",
+          "skill": "Exacte Nederlandse skillnaam",
           "niveau": "Basis|Gevorderd|Expert",
           "bron": "profiel|beroep|bedrijf",
           "toelichting": "string",
@@ -205,14 +204,13 @@ Geef terug als JSON:
 
 Regels:
 - 3-6 hardskills en 2-4 softskills per taak
-- Gebruik precieze, gangbare Nederlandse terminologie (zodat ESCO-matching werkt)
+- Gebruik precieze, gangbare Nederlandse terminologie zodat ESCO-matching werkt
 - Markeer bedrijfseigen termen als eigen:true
-- Geen ESCO-codes invullen — die worden automatisch opgezocht`;
+- Geen ESCO-codes invullen — die worden automatisch live opgezocht`;
 
   const claudeResultaat = await vraagClaude(sys, prompt, apiKey);
 
   // ── ESCO live verrijking ──────────────────────────────────────────────────
-  // Verzamel alle unieke hardskills + softskills
   const alleHardskills = [...new Set(
     (claudeResultaat.taken ?? []).flatMap(t => (t.hardskills ?? []).map(s => s.skill))
   )];
@@ -220,13 +218,11 @@ Regels:
     (claudeResultaat.taken ?? []).flatMap(t => (t.softskills ?? []).map(s => s.softskill))
   )];
 
-  // Parallel ESCO lookups voor hard- én softskills
   const [escoHard, escoSoft] = await Promise.all([
     verrijkSkillsMetEsco(alleHardskills, 'nl'),
     verrijkSkillsMetEsco(alleSoftskills, 'nl'),
   ]);
 
-  // Verrijking terugschrijven naar het resultaat
   const verrijktResultaat = {
     ...claudeResultaat,
     taken: (claudeResultaat.taken ?? []).map(taak => ({
@@ -248,7 +244,6 @@ Regels:
 // ─── Vercel handler ──────────────────────────────────────────────────────────
 
 export default async function handler(req, res) {
-  // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -257,7 +252,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Alleen POST' });
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY niet ingesteld in Vercel omgevingsvariabelen' });
+  if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY niet ingesteld in Vercel' });
 
   try {
     const { stap, functieprofiel, functietitel, taken, bedrijf, eigenTaal } = req.body ?? {};
