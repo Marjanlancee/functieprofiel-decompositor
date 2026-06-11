@@ -24,9 +24,10 @@ GEEF ALLEEN GELDIG JSON TERUG. Geen uitleg, geen markdown, geen backticks. Begin
 {"functietitel":"string","samenvatting":"string","vergelijkbare_titels":["string"],"taken":[{"id":1,"taak":"string","bron":"functieprofiel|aangevuld|beide","frequentie":"dagelijks|wekelijks|maandelijks|incidenteel","belang":"hoog|middel|laag","vakmanschap":"hoog|middel|laag","taak_skills":[{"skill":"vakjargon naam","esco_zoekterm":"officiële ESCO naam","niveau":"Basis|Gevorderd|Expert","toelichting":"string","eigen":false}],"generieke_competenties":[{"competentie":"string","toelichting":"string","eigen":false}]}],"kerncompetenties":[{"competentie":"string","definitie":"string","eigen":false}]}
 
 Regels:
-- 8-12 taken, actief geformuleerd en specifiek
-- Per taak: 2-3 skills, 2-3 generieke competenties
-- Kerncompetenties: 4-5 stuks
+- 5-7 taken, actief geformuleerd en specifiek
+- Per taak: 2-3 skills, 2 generieke competenties
+- Kerncompetenties: 4 stuks
+- Houd toelichtingen kort (max 8 woorden)
 - bron: "functieprofiel" als expliciet vermeld, "aangevuld" als toegevoegd, "beide" als beide
 - Basis=uitvoerend/begeleiding, Gevorderd=zelfstandig/complex, Expert=strategisch/begeleidt anderen
 - eigen:true alleen als de term uit de eigen competentietaal van het bedrijf komt`;
@@ -79,7 +80,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-5',
-        max_tokens: 6000,
+        max_tokens: 8000,
         system: buildSystemPrompt(bedrijf, eigenTaal),
         messages: [{ role: 'user', content: `Analyseer dit functieprofiel:\n\n${functieprofiel}` }]
       })
