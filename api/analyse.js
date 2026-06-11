@@ -1,13 +1,16 @@
 export const config = { api: { bodyParser: true } };
 
 // ─── ESCO selectie ────────────────────────────────────────────────────────────
-function selectEscoSkills(functietitel, taken, escoData, maxSize=300) {
+function selectEscoSkills(functietitel, taken, escoData, maxSize=250) {
   if (!escoData || !escoData.length) return [];
+  // Filter: alleen zinvolle labels (min 10 tekens, minimaal 2 woorden)
+  const filtered = escoData.filter(s => s[0].length > 10 && s[0].includes(' '));
+  
   const titleWords = functietitel.toLowerCase().split(' ').filter(w => w.length > 3);
   const takenWords = [...new Set(taken.flatMap(t => t.toLowerCase().split(' ').filter(w => w.length > 4)))];
   
   const scored = [];
-  for (const s of escoData) {
+  for (const s of filtered) {
     const label = s[0].toLowerCase();
     let score = titleWords.reduce((a, w) => a + (label.includes(w) ? 3 : 0), 0);
     score += takenWords.reduce((a, w) => a + (label.includes(w) ? 1 : 0), 0);
@@ -15,9 +18,10 @@ function selectEscoSkills(functietitel, taken, escoData, maxSize=300) {
   }
   scored.sort((a, b) => b[0] - a[0]);
   
-  const selected = scored.slice(0, maxSize - 60).map(x => x[1]);
+  const selected = scored.slice(0, maxSize - 50).map(x => x[1]);
   const codes = new Set(selected.map(s => s[1]));
-  for (const s of escoData) {
+  // Voeg transversal toe (communiceren, samenwerken etc)
+  for (const s of filtered) {
     if (s[2] === 'tr' && !codes.has(s[1]) && selected.length < maxSize) {
       selected.push(s); codes.add(s[1]);
     }
@@ -76,7 +80,8 @@ GEEF ALLEEN GELDIG JSON TERUG. Geen uitleg, geen markdown, geen backticks.
 {"taken":[{"id":1,"hardskills":[{"skill":"exacte naam uit lijst","niveau":"Basis|Gevorderd|Expert","toelichting":"kort","bron":"profiel|beroep|bedrijf","eigen":false}],"softskills":[{"softskill":"exacte naam uit lijst","niveau":"Basis|Gevorderd|Expert","toelichting":"kort","bron":"profiel|beroep|bedrijf","eigen":false}]}]}
 
 - Per taak: 2-3 hardskills, 2 softskills  
-- Kopieer de naam EXACT zoals in de lijst (inclusief spaties en leestekens)
+- Kopieer de naam EXACT zoals in de lijst — inclusief alle woorden, spaties en leestekens
+- Gebruik NOOIT een verkorte of aangepaste versie van de naam
 - Voor bedrijfsskills: kies de best passende ESCO-naam, maar zet bron:"bedrijf" en eigen:true
 - eigen:true ALLEEN voor bedrijfsskills`;
 }
@@ -131,15 +136,42 @@ export default async function handler(req, res) {
         ? eigenTaal.split(/[,\n]/).map(t => t.trim()).filter(Boolean) : [];
 
       const lookupCode = (name) => {
-        // Exacte match
-        const exact = escoLabelMap.get(name.toLowerCase());
+        if (!name) return null;
+        const q = name.toLowerCase().trim();
+        
+        // 1. Exacte match in volledige database
+        const exact = escoLabelMap.get(q);
         if (exact) return { code: exact, label: name };
-        // Zoek in selectie
-        const inSelection = escoSelection.find(s => s[0].toLowerCase() === name.toLowerCase());
-        if (inSelection) return { code: inSelection[1], label: inSelection[0] };
-        // Gedeeltelijke match in selectie
-        const partial = escoSelection.find(s => s[0].toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(s[0].toLowerCase()));
-        if (partial) return { code: partial[1], label: partial[0] };
+        
+        // 2. Exacte match in selectie
+        const inSel = escoSelection.find(s => s[0].toLowerCase() === q);
+        if (inSel) return { code: inSel[1], label: inSel[0] };
+        
+        // 3. Selectie bevat zoekterm
+        const contains = escoSelection.filter(s => s[0].toLowerCase().includes(q) && q.length > 8);
+        if (contains.length) {
+          contains.sort((a, b) => a[0].length - b[0].length);
+          return { code: contains[0][1], label: contains[0][0] };
+        }
+        
+        // 4. Zoekterm bevat selectie-label
+        const reverse = escoSelection.filter(s => q.includes(s[0].toLowerCase()) && s[0].length > 10);
+        if (reverse.length) {
+          reverse.sort((a, b) => b[0].length - a[0].length);
+          return { code: reverse[0][1], label: reverse[0][0] };
+        }
+        
+        // 5. Woordoverlap in selectie (gewogen)
+        const words = q.split(' ').filter(w => w.length > 4);
+        if (words.length) {
+          let best = null, bestScore = 0;
+          for (const s of escoSelection) {
+            const sl = s[0].toLowerCase();
+            const score = words.reduce((a, w) => a + (sl.includes(w) ? w.length : 0), 0);
+            if (score > bestScore) { bestScore = score; best = s; }
+          }
+          if (bestScore >= 6 && best) return { code: best[1], label: best[0] };
+        }
         return null;
       };
 
