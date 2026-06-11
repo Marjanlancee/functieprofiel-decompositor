@@ -36,41 +36,54 @@ Analyseer de functie en genereer 20-40 taken. Gebruik:
 
 GEEF ALLEEN GELDIG JSON TERUG. Geen uitleg, geen markdown, geen backticks.
 
-{"functietitel":"string","samenvatting":"string","vergelijkbare_titels":["string"],"taken":[{"id":1,"taak":"string","bron":"functieprofiel|aangevuld|beide","frequentie":"dagelijks|wekelijks|maandelijks|incidenteel","belang":"hoog|middel|laag","vakmanschap":"hoog|middel|laag","geselecteerd":true}]}
+{"functietitel":"string","samenvatting":"string","vergelijkbare_titels":["string"],"taken":[{"id":1,"taak":"string","bron":"profiel|beroep|beide","frequentie":"dagelijks|wekelijks|maandelijks|incidenteel","belang":"hoog|middel|laag","vakmanschap":"hoog|middel|laag","geselecteerd":true}]}
 
 Regels:
 - 20-40 taken, actief geformuleerd
-- bron: functieprofiel / aangevuld / beide
+- bron: "profiel" als taak uit het functieprofiel komt, "beroep" als aangevuld vanuit beroepskennis, "beide" als beide
 - Sorteer van meest naar minst relevant
 - geselecteerd: true voor de top 15 meest relevante taken, false voor de rest`;
 }
 
 // ─── Prompt stap 2: Skills koppelen ──────────────────────────────────────────
 function promptSkills(functietitel, taken, bedrijf, eigenTaal) {
-  const eigenBlok = eigenTaal?.trim()
-    ? `\nBedrijfsskills van ${bedrijf || 'dit bedrijf'} (markeer met "eigen":true): ${eigenTaal}\n`
-    : '';
-  const takenlijst = taken.map(t => `${t.id}. ${t.taak}`).join('\n');
+  const eigenTermen = eigenTaal?.trim() 
+    ? eigenTaal.split(/[,\n]/).map(t => t.trim()).filter(Boolean)
+    : [];
+  const eigenBlok = eigenTermen.length
+    ? `\nBedrijfsskills van ${bedrijf||"dit bedrijf"} (ALLEEN deze termen krijgen bron:"bedrijf" en eigen:true): ${eigenTermen.join(", ")}\n`
+    : "";
+  const takenlijst = taken.map(t => `${t.id}. ${t.taak}`).join("\n");
+  
   return `Je bent een expert in skills-based werken.
 Functie: ${functietitel}
 ${eigenBlok}
-Koppel ESCO-skills aan de volgende taken. Geef per skill de vakjargon-naam EN de officiële ESCO-zoekterm.
+Koppel voor elke taak hardskills en softskills. Gebruik drie bronnen:
+- bron "profiel": skill staat expliciet in het functieprofiel
+- bron "beroep": skill hoort bij het beroep/sector op basis van vakkennis
+- bron "bedrijf": skill komt UITSLUITEND uit de opgegeven bedrijfsskills lijst
+
+Voor elke skill geef je:
+1. "skill" = vakjargon/praktijknaam
+2. "esco_zoekterm" = officiële Nederlandse ESCO-naam
+3. "bron" = profiel | beroep | bedrijf
+4. eigen:true ALLEEN als bron="bedrijf"
 
 Taken:
 ${takenlijst}
 
 GEEF ALLEEN GELDIG JSON TERUG. Geen uitleg, geen markdown, geen backticks.
 
-{"taken":[{"id":1,"hardskills":[{"skill":"vakjargon naam","esco_zoekterm":"officiële ESCO naam","niveau":"Basis|Gevorderd|Expert","toelichting":"kort","eigen":false}],"softskills":[{"softskill":"naam","toelichting":"kort","eigen":false}]}],"kerncompetenties":[{"competentie":"string","definitie":"string","eigen":false}]}
+{"taken":[{"id":1,"hardskills":[{"skill":"vakjargon","esco_zoekterm":"ESCO naam","niveau":"Basis|Gevorderd|Expert","toelichting":"kort","bron":"profiel|beroep|bedrijf","eigen":false}],"softskills":[{"softskill":"naam","esco_zoekterm":"ESCO naam","niveau":"Basis|Gevorderd|Expert","toelichting":"kort","bron":"profiel|beroep|bedrijf","eigen":false}]}],"kerncompetenties":[{"competentie":"string","definitie":"string","bron":"profiel|beroep|bedrijf","eigen":false}]}
 
 Regels:
 - Per taak: 2-3 hardskills, 2 softskills
-- Kerncompetenties: 4-5 stuks
-- Vakjargon = praktijktaal die het bedrijf gebruikt
-- ESCO zoekterm = officiële Nederlandse ESCO naam
-- Basis=uitvoerend, Gevorderd=zelfstandig, Expert=strategisch
-- eigen:true alleen voor bedrijfsskills`;
+- Kerncompetenties: 4-5 stuks (worden samengevoegd met softskills)
+- Softskills hebben ook een esco_zoekterm
+- eigen:true ALLEEN als de term letterlijk in de bedrijfsskills lijst staat
+- Basis=uitvoerend, Gevorderd=zelfstandig, Expert=strategisch`;
 }
+
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
 export default async function handler(req, res) {
@@ -125,15 +138,26 @@ export default async function handler(req, res) {
       try { parsed = JSON.parse(raw.trim()); }
       catch { const a = raw.indexOf('{'), b = raw.lastIndexOf('}'); parsed = JSON.parse(raw.slice(a, b+1)); }
 
-      // ESCO matching
+      // ESCO matching voor hardskills EN softskills
       if (escoData && Array.isArray(escoData)) {
         parsed.taken = (parsed.taken || []).map(t => ({
           ...t,
           hardskills: (t.hardskills || []).map(s => {
             const match = matchEsco(s.esco_zoekterm || s.skill, escoData);
             return { ...s, esco_code: match?.code || null, esco_label: match?.label || null, esco_matched: !!match };
+          }),
+          softskills: (t.softskills || []).map(s => {
+            const match = matchEsco(s.esco_zoekterm || s.softskill, escoData);
+            return { ...s, esco_code: match?.code || null, esco_label: match?.label || null, esco_matched: !!match };
           })
         }));
+        // ESCO matching voor kerncompetenties
+        if (parsed.kerncompetenties) {
+          parsed.kerncompetenties = parsed.kerncompetenties.map(k => {
+            const match = matchEsco(k.competentie, escoData);
+            return { ...k, esco_code: match?.code || null, esco_matched: !!match };
+          });
+        }
       }
       return res.status(200).json(parsed);
 
@@ -143,4 +167,4 @@ export default async function handler(req, res) {
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }
-} 
+}
