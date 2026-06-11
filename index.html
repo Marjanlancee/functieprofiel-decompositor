@@ -224,6 +224,10 @@ function App() {
   };
 
   // Alle hardskills verzamelen voor stap 3
+  // Voeg bedrijfseigen termen toe die niet door Claude zijn meegenomen
+  const eigenTermenLijst = eigenTaal.trim()
+    ? eigenTaal.split(/[,\n]/).map(t => t.trim()).filter(Boolean) : [];
+
   const alleHardskills = skillsData ? (() => {
     const map = new Map();
     (skillsData.taken || []).flatMap(t => (t.hardskills || []).map(s => ({
@@ -232,6 +236,20 @@ function App() {
       // Keep entry with esco_code if exists
       if (!map.has(s.skill) || (!map.get(s.skill).esco_code && s.esco_code)) {
         map.set(s.skill, s);
+      }
+    });
+    // Voeg bedrijfseigen termen toe die nog niet in de map zitten
+    eigenTermenLijst.forEach(term => {
+      if (!map.has(term)) {
+        map.set(term, {
+          skill: term,
+          niveau: "Gevorderd",
+          bron: "bedrijf",
+          eigen: true,
+          esco_code: null,
+          esco_label: null,
+          esco_matched: false
+        });
       }
     });
     return [...map.values()];
