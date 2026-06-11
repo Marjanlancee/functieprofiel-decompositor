@@ -150,6 +150,7 @@ function App() {
   const [error, setError] = useState(null);
   const [escoData, setEscoData] = useState(null);
   const [escoLoaded, setEscoLoaded] = useState(false);
+  const [sector, setSector] = useState('techniek');
 
   // Stap 1 data
   const [functietitel, setFunctietitel] = useState("");
@@ -167,8 +168,15 @@ function App() {
   const [selectedDef, setSelectedDef] = useState({});
 
   useEffect(() => {
-    fetch('/esco_skills.json').then(r => r.json()).then(d => { setEscoData(d); setEscoLoaded(true); }).catch(() => {});
-  }, []);
+    setEscoLoaded(false);
+    fetch(`/esco_${sector}.json`)
+      .then(r => r.json())
+      .then(d => { setEscoData(d); setEscoLoaded(true); })
+      .catch(() => {
+        // Fallback to full database
+        fetch('/esco_skills.json').then(r => r.json()).then(d => { setEscoData(d); setEscoLoaded(true); }).catch(() => {});
+      });
+  }, [sector]);
 
   const heeftEigen = eigenTaal.trim().length > 0;
   const geselecteerdeTaken = taken.filter(t => t.geselecteerd);
@@ -275,50 +283,58 @@ function App() {
     const wb = XLSX.utils.book_new();
     const datum = new Date().toLocaleDateString('nl-NL');
 
-    // Sheet 1: Hardskills
-    const hardData = [
-      [`Bedrijf: ${bedrijf || "-"}`, "", "", "", ""],
-      [`Functie: ${functietitel}`, "", "", "", ""],
-      [`Datum: ${datum}`, "", "", "", ""],
-      ["", "", "", "", ""],
-      ["Bedrijfsspecifiek", "ESCO Label", "ESCO Code", "Niveau", "Bron"],
-      ...selHard.map(s => [
-        s.skill,
-        s.eigen ? (s.esco_label || "") : s.skill,
-        s.esco_code || "",
-        s.niveau,
-        s.eigen ? "🏢 Bedrijf" : s.bron === "profiel" ? "📄 Profiel" : "🔧 Beroep"
-      ])
+    // Één grote tabel: taken + skills
+    const rows = [
+      // Header
+      [`Bedrijf: ${bedrijf || '-'}`, '', '', '', '', '', '', '', '', '', ''],
+      [`Functie: ${functietitel}`, '', '', '', '', '', '', '', '', '', ''],
+      [`Datum: ${datum}`, '', '', '', '', '', '', '', '', '', ''],
+      ['', '', '', '', '', '', '', '', '', '', ''],
+      ['Nr', 'Taak', 'Type', 'Skill', 'ESCO Label', 'ESCO Definitie', 'ESCO Code', 'Niveau', 'Bron', 'Frequentie', 'Belang']
     ];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(hardData), "Hardskills");
 
-    // Sheet 2: Softskills
-    const softData = [
-      [`Bedrijf: ${bedrijf || "-"}`, "", "", "", ""],
-      [`Functie: ${functietitel}`, "", "", "", ""],
-      [`Datum: ${datum}`, "", "", "", ""],
-      ["", "", "", "", ""],
-      ["Softskill", "ESCO Label", "ESCO Code", "Niveau", "Bron"],
-      ...selSoft.map(s => [
-        s.softskill,
-        s.esco_label && s.esco_label !== s.softskill ? s.esco_label : s.softskill,
-        s.esco_code || "",
-        s.niveau || "Gevorderd",
-        s.eigen ? "🏢 Bedrijf" : s.bron === "profiel" ? "📄 Profiel" : "🔧 Beroep"
-      ])
-    ];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(softData), "Softskills");
+    // Haal geselecteerde skills op per taak
+    const skillsPerTaak = new Map();
+    if (skillsData) {
+      (skillsData.taken || []).forEach(t => {
+        skillsPerTaak.set(t.id, t);
+      });
+    }
 
-    // Sheet 3: Taken
-    const takenData = [
-      [`Bedrijf: ${bedrijf || "-"}`, "", "", "", "", ""],
-      [`Functie: ${functietitel}`, "", "", "", "", ""],
-      [`Datum: ${datum}`, "", "", "", "", ""],
-      ["", "", "", "", "", ""],
-      ["Nr", "Taak", "Bron", "Frequentie", "Belang", "Vakmanschap"],
-      ...geselecteerdeTaken.map(t => [t.id, t.taak, t.bron, t.frequentie, t.belang, t.vakmanschap])
-    ];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(takenData), "Taken");
+    geselecteerdeTaken.forEach(taak => {
+      const skillTaak = skillsPerTaak.get(taak.id);
+      const hardskills = skillTaak ? (skillTaak.hardskills || []) : [];
+      const softskills = skillTaak ? (skillTaak.softskills || []) : [];
+      const allSkills = [
+        ...hardskills.map(s => ({...s, type: 'Hard', naam: s.skill, niveau: getNiveau(taak.id, s.skill, s.niveau)})),
+        ...softskills.map(s => ({...s, type: 'Soft', naam: s.softskill, niveau: getNiveau(taak.id, `soft-${s.softskill}`, s.niveau||'Gevorderd')}))
+      ];
+
+      if (allSkills.length === 0) {
+        rows.push([taak.id, taak.taak, '', '', '', '', '', '', taak.bron, taak.frequentie, taak.belang]);
+      } else {
+        allSkills.forEach((s, i) => {
+          rows.push([
+            i === 0 ? taak.id : '',
+            i === 0 ? taak.taak : '',
+            s.type,
+            s.naam,
+            s.esco_label || s.naam,
+            s.esco_definitie || '',
+            s.esco_code || '',
+            s.niveau,
+            i === 0 ? taak.bron : '',
+            i === 0 ? taak.frequentie : '',
+            i === 0 ? taak.belang : ''
+          ]);
+        });
+      }
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    // Kolombreedte instellen
+    ws['!cols'] = [{wch:4},{wch:45},{wch:6},{wch:35},{wch:35},{wch:50},{wch:12},{wch:12},{wch:10},{wch:12},{wch:8}];
+    XLSX.utils.book_append_sheet(wb, ws, 'Functieprofiel Skillset');
 
     XLSX.writeFile(wb, `Skillset_${bedrijf ? bedrijf.replace(/\s/g,'_')+'_' : ''}${functietitel.replace(/\s/g,'_')}_${datum.replace(/\//g,'-')}.xlsx`);
   };
@@ -334,9 +350,21 @@ function App() {
         <div className="site-title"><span>Functie</span>profiel <em>Decompositor</em></div>
       </div>
       <div className="header-bedrijf">
-        <input className="field" value={bedrijf} onChange={e => setBedrijf(e.target.value)}
-          placeholder="Bedrijfsnaam" style={{width:180,fontSize:11}} />
-        {escoLoaded && <div style={{fontSize:8,color:"#2d6a4f",textAlign:"right"}}>✓ ESCO: {escoData?.length?.toLocaleString()} skills</div>}
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <input className="field" value={bedrijf} onChange={e => setBedrijf(e.target.value)}
+            placeholder="Bedrijfsnaam" style={{width:150,fontSize:11}} />
+          <select value={sector} onChange={e => setSector(e.target.value)}
+            style={{fontFamily:"'Geist Mono',monospace",fontSize:11,background:"var(--bg)",border:"1px solid var(--border)",color:"var(--text)",padding:"7px 10px",borderRadius:2,outline:"none",cursor:"pointer"}}>
+            <option value="techniek">Techniek</option>
+            <option value="zorg">Zorg</option>
+            <option value="ict">ICT</option>
+            <option value="handel">Handel</option>
+            <option value="finance">Finance</option>
+            <option value="horeca">Horeca</option>
+            <option value="onderwijs">Onderwijs</option>
+          </select>
+        </div>
+        {escoLoaded && <div style={{fontSize:8,color:"#2d6a4f",textAlign:"right",marginTop:2}}>✓ ESCO {sector}: {escoData?.length?.toLocaleString()} skills</div>}
       </div>
     </div>
 
