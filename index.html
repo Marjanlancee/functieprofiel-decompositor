@@ -365,6 +365,7 @@ function App() {
                           const d = D[n];
                           return <span key={s.skill} className="pill" style={{background:s.eigen?"#f3e8ff":d.k,color:s.eigen?"#6b21a8":d.t,borderColor:s.eigen?"#c084fc":d.b}}>
                             <span className="pd" style={{background:s.eigen?"#c084fc":d.d}}/>{s.skill}
+                            {s.esco_code && <span style={{opacity:.6,fontSize:8,marginLeft:3}}>{s.esco_code}</span>}
                           </span>;
                         })}
                         {t.taak_skills.length > 3 && <span className="pill" style={{borderColor:"var(--border)",color:"var(--muted)"}}>+{t.taak_skills.length-3}</span>}
@@ -388,8 +389,9 @@ function App() {
                               <div className="sk-name">
                                 {s.skill}
                                 {s.eigen && <span className="eigen-badge">Eigen</span>}
-                                {!s.eigen && s.esco_matched && s.esco_code && <span className="esco-badge">ESCO {s.esco_code}</span>}
+                                {!s.eigen && s.esco_matched && <span className="esco-badge" title={s.esco_label}>ESCO {s.esco_code}</span>}
                                 {!s.eigen && !s.esco_matched && <span className="no-esco">geen ESCO match</span>}
+                                {!s.eigen && s.esco_label && s.esco_label !== s.skill && <div style={{fontSize:9,color:"#1a56db",marginTop:2,opacity:.8}}>↳ {s.esco_label}</div>}
                                 {changed && <span className="was">(was: {s.niveau})</span>}
                                 {s.toelichting && <div style={{fontSize:9,color:"var(--muted)",marginTop:2}}>{s.toelichting}</div>}
                               </div>
@@ -444,7 +446,11 @@ function App() {
                     </div>
                     <div className="sg">{esco.map(s => { const d=D[s.niveau]; return <div key={s.skill} className="sb" style={{background:d.k,color:d.t,borderColor:d.b}}>
                       <span className="pd" style={{background:d.d}}/>
-                      <div className="sn">{s.skill}{s.esco_code && <div className="se">ESCO: {s.esco_code}</div>}</div>
+                      <div className="sn">
+                      {s.skill}
+                      {s.esco_label && s.esco_label !== s.skill && <div className="se" style={{color:"#1a56db"}}>↳ {s.esco_label}</div>}
+                      {s.esco_code && <div className="se">ESCO: {s.esco_code}</div>}
+                    </div>
                       <span className="snv">{s.niveau}</span>
                     </div>; })}</div>
                   </div>
@@ -458,7 +464,11 @@ function App() {
                   const d=D[s.niveau];
                   return <div key={s.skill} className="sb" style={{background:d.k,color:d.t,borderColor:d.b}}>
                     <span className="pd" style={{background:d.d}}/>
-                    <div className="sn">{s.skill}{s.esco_code && <div className="se">ESCO: {s.esco_code}</div>}</div>
+                    <div className="sn">
+                      {s.skill}
+                      {s.esco_label && s.esco_label !== s.skill && <div className="se" style={{color:"#1a56db"}}>↳ {s.esco_label}</div>}
+                      {s.esco_code && <div className="se">ESCO: {s.esco_code}</div>}
+                    </div>
                     <span className="snv">{s.niveau}</span>
                   </div>;
                 })}</div>
