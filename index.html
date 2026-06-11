@@ -263,7 +263,7 @@ function App() {
       [`Functie: ${functietitel}`, "", "", "", ""],
       [`Datum: ${datum}`, "", "", "", ""],
       ["", "", "", "", ""],
-      ["Skill (vakjargon)", "ESCO Label", "ESCO Code", "Niveau", "Bron"],
+      ["Bedrijfsspecifiek", "ESCO Label", "ESCO Code", "Niveau", "Bron"],
       ...selHard.map(s => [
         s.skill,
         s.esco_label && s.esco_label !== s.skill ? s.esco_label : s.skill,
@@ -332,12 +332,17 @@ function App() {
           </button>
           {eigenOpen && <div className="eigen-panel">
             <div>
-              <label className="slabel" style={{color:"#6b21a8"}}>Kernwaarden & verplichte skills</label>
-              <textarea rows={4} value={eigenTaal} onChange={e => setEigenTaal(e.target.value)}
-                placeholder={"bijv. Samenwerken,\nKlantgerichtheid,\nContinu verbeteren,\nVeilig werken"}
+              <label className="slabel" style={{color:"#6b21a8"}}>Bedrijfseigen termen & kernwaarden</label>
+              <textarea rows={5} value={eigenTaal} onChange={e => setEigenTaal(e.target.value)}
+                placeholder={"bijv. Veiligheid eerst,\nKlantpartnerschap,\nZero defects,\nContinu verbeteren"}
                 style={{minHeight:"auto",fontSize:11}} />
-              <div style={{fontSize:9,color:"#6b21a8",marginTop:3,lineHeight:1.5}}>
-                Komma- of regelgescheiden. Worden gemarkeerd met <span className="eigen-badge" style={{marginLeft:0}}>Eigen</span>
+              <div style={{fontSize:9,color:"#6b21a8",marginTop:6,lineHeight:1.7,background:"#f3e8ff",padding:"8px 10px",borderRadius:2}}>
+                <strong>Wat vul je hier in?</strong><br/>
+                Termen die jouw organisatie gebruikt maar die niet in standaard vacaturetaal staan:<br/>
+                • <strong>Kernwaarden</strong> zoals "Veiligheid eerst" of "Klantpartnerschap"<br/>
+                • <strong>Bedrijfseigen werkwijzen</strong> zoals "De Hoppenbrouwers-aanpak"<br/>
+                • <strong>Gedragsregels</strong> zoals "Altijd terugkoppelen"<br/><br/>
+                De tool koppelt deze automatisch aan een ESCO-skill én markeert ze als <span className="eigen-badge" style={{marginLeft:0}}>Bedrijf</span> zodat ze herkenbaar blijven.
               </div>
             </div>
           </div>}
