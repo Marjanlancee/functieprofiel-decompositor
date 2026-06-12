@@ -216,12 +216,14 @@ function App() {
   const exportExcel = () => {
     const wb = XLSX.utils.book_new();
     const datum = new Date().toLocaleDateString('nl-NL');
+
+    // ── Tabblad 1: Functieprofiel Skillset ──────────────────────────────────
     const rows = [
       [`Bedrijf: ${bedrijf||'-'}`,'','','','','','','','','',''],
       [`Functie: ${functietitel}`,'','','','','','','','','',''],
       [`Datum: ${datum}`,'','','','','','','','','',''],
       ['','','','','','','','','','',''],
-      ['Nr','Taak','Type','Skill','ESCO Label','ESCO Definitie','ESCO Code','Niveau','Bron','Frequentie','Belang']
+      ['Nr','Taak','Type','Skill','ESCO Label','ESCO Definitie','ESCO URI','Niveau','Bron','Frequentie','Belang']
     ];
     const skillsPerTaak = new Map();
     if (skillsData) (skillsData.taken||[]).forEach(t => skillsPerTaak.set(t.id,t));
@@ -241,15 +243,43 @@ function App() {
           s.type, s.naam,
           s.esco_label||s.naam,
           s.esco_definitie||'',
-          s.esco_code||'',
+          s.esco_uri||'',
           s.niveau,
           i===0?taak.bron:'', i===0?taak.frequentie:'', i===0?taak.belang:''
         ]));
       }
     });
     const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws['!cols'] = [{wch:4},{wch:45},{wch:6},{wch:35},{wch:35},{wch:50},{wch:38},{wch:12},{wch:10},{wch:12},{wch:8}];
-    XLSX.utils.book_append_sheet(wb,ws,'Functieprofiel Skillset');
+    ws['!cols'] = [{wch:4},{wch:45},{wch:6},{wch:35},{wch:35},{wch:55},{wch:60},{wch:12},{wch:10},{wch:12},{wch:8}];
+    XLSX.utils.book_append_sheet(wb, ws, 'Functieprofiel Skillset');
+
+    // ── Tabblad 2: Methodiek ────────────────────────────────────────────────
+    const meta = [
+      ['METHODIEK — Functieprofiel Decompositor',''],
+      ['Bright Work Solutions',''],
+      ['',''],
+      ['ONDERDEEL','TOELICHTING'],
+      ['Taken — hoe bepaald?','Claude analyseert het functieprofiel en combineert drie bronnen: (1) taken expliciet vermeld in het ingevoerde profiel, (2) standaardtaken die bij het beroep horen op basis van trainingsdata (beroepsliteratuur, functieomschrijvingen, sectorkennis), (3) taken passend bij de bedrijfscontext indien opgegeven.'],
+      ['Frequentie (dagelijks / wekelijks / maandelijks)','Claude schat de frequentie op basis van de aard van de taak. Operationele uitvoeringstaken zijn doorgaans dagelijks, coördinatie- en overlegtaken wekelijks, strategische of rapportagetaken maandelijks. Dit is een modelschatting, geen vaste norm.'],
+      ['Bron van beroepen en sectoren','Trainingsdata van Claude — bestaande uit functieomschrijvingen, cao-teksten, beroepsgidsen, sectorrapportages en internationale arbeidsmarktbronnen zoals O*NET (VS) en ISCO (ILO). De tool combineert het ingevoerde profiel met deze achtergrondkennis.'],
+      ['Skills — databron','Alle skills komen uit de officiële ESCO-database (European Skills, Competences, Qualifications and Occupations) van de Europese Commissie, versie 1.2, Nederlands. Zie: https://esco.ec.europa.eu'],
+      ['Skills — selectie (max. 300 per analyse)','Uit de volledige ESCO-database van ca. 14.000 skills worden per analyse de 300 meest relevante geselecteerd op basis van woordoverlap met de functietitel en de gegenereerde taken. Skills met de hoogste overlap krijgen prioriteit. Claude kiest vervolgens uit deze gefilterde lijst — niet daarbuiten.'],
+      ['ESCO Definitie','De definities komen rechtstreeks uit de officiële ESCO-datadump (veld: description). Ze zijn niet bewerkt of vertaald — dit zijn de originele Nederlandse ESCO-beschrijvingen.'],
+      ['ESCO URI','De ESCO URI is de unieke, permanente identifier van elke skill in de Europese database, bijv. http://data.europa.eu/esco/skill/722be5b6-3a2f-... Via deze URI is de skill direct opzoekbaar op het ESCO-portaal (https://esco.ec.europa.eu).'],
+      ['Ook bekend als (vergelijkbare titels)','Gangbare synoniemen en functietitelvarianten gegenereerd door Claude op basis van trainingsdata (functieomschrijvingen, arbeidsmarktliteratuur). Dit zijn modelinschattingen van verwante titels — geen gestandaardiseerde bron.'],
+      ['Niveaus (Basis / Gevorderd / Expert)','Claude schat het vereiste niveau per skill per taak in op basis van de taakomschrijving en de context van het profiel. De gebruiker kan niveaus aanpassen via sliders in stap 2. Basis = uitvoerend, onder begeleiding; Gevorderd = zelfstandig, ook complexe situaties; Expert = strategisch, begeleidt anderen.'],
+      ['Bedrijfseigen termen','Termen die de gebruiker zelf invoert als bedrijfsspecifieke competenties of kernwaarden. Deze worden niet gematcht op ESCO, maar als eigen skill toegevoegd aan de skillset. Herkenbaar via het paarse "Bedrijf"-label.'],
+      ['',''],
+      ['BRONVERMELDING',''],
+      ['ESCO database','https://esco.ec.europa.eu/nl'],
+      ['ESCO datadump NL (download)','https://esco.ec.europa.eu/en/use-esco/download'],
+      ['O*NET Online (referentie)','https://www.onetonline.org'],
+      ['ISCO-08 (referentie)','https://www.ilo.org/ilostat-files/ISCO/newdocs-08-2012/ISCO-08-EN.pdf'],
+    ];
+    const wsMeta = XLSX.utils.aoa_to_sheet(meta);
+    wsMeta['!cols'] = [{wch:35},{wch:90}];
+    XLSX.utils.book_append_sheet(wb, wsMeta, 'Methodiek');
+
     XLSX.writeFile(wb,`Skillset_${bedrijf?bedrijf.replace(/\s/g,'_')+'_':''}${functietitel.replace(/\s/g,'_')}_${datum.replace(/\//g,'-')}.xlsx`);
   };
 
@@ -400,7 +430,6 @@ function App() {
                         const n=getNiveau(t.id,s.skill,s.niveau); const d=D[n];
                         return <span key={s.skill} className="pill" style={{background:s.eigen?"#f3e8ff":d.k,color:s.eigen?"#6b21a8":d.t,borderColor:s.eigen?"#c084fc":d.b}}>
                           <span className="pd" style={{background:s.eigen?"#c084fc":d.d}}/>{s.skill}
-                          {s.esco_code&&<span style={{opacity:.6,fontSize:7,marginLeft:2}}>{s.esco_code.slice(0,8)}…</span>}
                         </span>;
                       })}
                     </div>}
@@ -419,7 +448,7 @@ function App() {
                             <div className="sk-name">
                               {s.skill}
                               {s.eigen&&<span className="eigen-badge">Eigen</span>}
-                              {!s.eigen&&s.esco_matched&&s.esco_code&&<span className="esco-badge" title={s.esco_uri}>{s.esco_code.slice(0,8)}…{s.esco_confidence&&s.esco_confidence<100&&<span style={{opacity:.65,fontSize:7,marginLeft:2}}> ~{s.esco_confidence}%</span>}</span>}
+                              {!s.eigen&&s.esco_matched&&s.esco_code&&<span className="esco-badge" title={s.esco_uri||''}>{s.esco_code}</span>}
                               {!s.eigen&&!s.esco_matched&&<span className="no-esco">geen ESCO match</span>}
                               {changed&&<span className="was">(was: {s.niveau})</span>}
                               {s.esco_label&&s.esco_label!==s.skill&&<div style={{fontSize:9,color:"#1a56db",marginTop:1,opacity:.8}}>↳ {s.esco_label}</div>}
@@ -447,7 +476,7 @@ function App() {
                             <span className="pd" style={{background:"#c4860a",width:6,height:6}}/>
                             <div className="sk-name">
                               {s.softskill}
-                              {s.esco_matched&&s.esco_code&&<span className="esco-badge">{s.esco_code.slice(0,8)}…</span>}
+                              {s.esco_matched&&s.esco_code&&<span className="esco-badge">{s.esco_code}</span>}
                               {!s.esco_matched&&<span className="no-esco">geen ESCO match</span>}
                               {changed&&<span className="was">(was: {s.niveau||"Gevorderd"})</span>}
                               {s.toelichting&&<div style={{fontSize:9,color:"var(--muted)",marginTop:1}}>{s.toelichting}</div>}
@@ -504,7 +533,7 @@ function App() {
                   <div style={{flex:1,fontSize:11}}>
                     {s.skill}
                     {s.eigen&&<span className="eigen-badge">Eigen</span>}
-                    {s.esco_code&&<span className="esco-badge" title={s.esco_uri}>{s.esco_code.slice(0,8)}…</span>}
+                    {s.esco_code&&<span className="esco-badge" title={s.esco_uri||''}>{s.esco_code}</span>}
                     {s.esco_label&&s.esco_label!==s.skill&&<span style={{fontSize:9,color:"#1a56db",marginLeft:5,opacity:.8}}>↳ {s.esco_label}</span>}
                   </div>
                   <span style={{fontSize:9,padding:"2px 7px",borderRadius:2,border:"1px solid",background:d.k,color:d.t,borderColor:d.b,flexShrink:0}}>{s.niveau}</span>
@@ -520,7 +549,7 @@ function App() {
                   <span style={{width:5,height:5,borderRadius:"50%",background:"#c4860a",flexShrink:0}}/>
                   <div style={{flex:1,fontSize:11}}>
                     {s.softskill}
-                    {s.esco_code&&<span className="esco-badge">{s.esco_code.slice(0,8)}…</span>}
+                    {s.esco_code&&<span className="esco-badge">{s.esco_code}</span>}
                   </div>
                   {(()=>{const d=D[s.niveau||"Gevorderd"];return <span style={{fontSize:9,padding:"2px 7px",borderRadius:2,border:"1px solid",background:d.k,color:d.t,borderColor:d.b,flexShrink:0}}>{s.niveau||"Gevorderd"}</span>;})()}
                 </div>;
