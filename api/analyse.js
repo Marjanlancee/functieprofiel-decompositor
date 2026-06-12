@@ -1,24 +1,59 @@
 // api/analyse.js — Functieprofiel Decompositor
-// ESCO Webservice API v1.2.0 — zoekt altijd in het Engels voor beste coverage
+// ESCO matching: Claude kiest uit echte ESCO-skills (niet zelf verzinnen)
+
+import fs from 'fs';
+import path from 'path';
 
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
-const ESCO_API      = 'https://ec.europa.eu/esco/api';
-const ESCO_VERSION  = '1.2.0';
 
-// ─── JSON reparatie bij afgekapte responses ───────────────────────────────────
+// ─── Laad ESCO bestanden (gecached) ──────────────────────────────────────────
 
-function herstelAfgekapteJson(json) {
-  try { JSON.parse(json); return json; } catch { /* doorgaan */ }
+let _hard = null;
+let _soft = null;
+
+function laadEsco() {
+  if (_hard && _soft) return { hard: _hard, soft: _soft };
+  const dir = process.cwd();
+  _hard = JSON.parse(fs.readFileSync(path.join(dir, 'esco_hardskills.json'), 'utf8'));
+  _soft = JSON.parse(fs.readFileSync(path.join(dir, 'esco_softskills.json'), 'utf8'));
+  console.log(`ESCO geladen: ${_hard.length} hardskills, ${_soft.length} softskills`);
+  return { hard: _hard, soft: _soft };
+}
+
+// ─── Selecteer relevante skills voor dit functieprofiel ───────────────────────
+
+function selecteerRelevante(functietitel, taken, hard, soft) {
+  // Bouw zoekindex uit functietitel + taken
+  const context = [functietitel, ...taken.map(t => t.taak)].join(' ').toLowerCase();
+
+  // Score elke hardskill op basis van woordoverlap met context
+  const gescoord = hard.map(row => {
+    const label = row[0].toLowerCase();
+    const woorden = label.split(/\s+/).filter(w => w.length > 3);
+    const score = woorden.filter(w => context.includes(w)).length;
+    return { row, score };
+  });
+
+  // Top 400 meest relevante hardskills
+  gescoord.sort((a, b) => b.score - a.score);
+  const topHard = gescoord.slice(0, 400).map(g => g.row);
+
+  return { topHard, soft };
+}
+
+// ─── JSON reparatie ───────────────────────────────────────────────────────────
+
+function herstelJson(json) {
+  try { JSON.parse(json); return json; } catch { /**/ }
   const opens = [];
-  let inString = false, escape = false;
-  for (let i = 0; i < json.length; i++) {
-    const c = json[i];
-    if (escape)         { escape = false; continue; }
-    if (c === '\\')     { escape = true;  continue; }
-    if (c === '"')      { inString = !inString; continue; }
-    if (inString)       continue;
-    if (c === '{')      opens.push('}');
-    else if (c === '[') opens.push(']');
+  let inStr = false, esc = false;
+  for (const c of json) {
+    if (esc)        { esc = false; continue; }
+    if (c === '\\') { esc = true;  continue; }
+    if (c === '"')  { inStr = !inStr; continue; }
+    if (inStr)      continue;
+    if (c === '{')       opens.push('}');
+    else if (c === '[')  opens.push(']');
     else if (c === '}' || c === ']') opens.pop();
   }
   let r = json.trimEnd().replace(/,\s*$/, '').replace(/,\s*([}\]])/g, '$1');
@@ -26,74 +61,16 @@ function herstelAfgekapteJson(json) {
   return r;
 }
 
-// ─── ESCO live lookup — altijd Engels ────────────────────────────────────────
-
-async function escoZoekSkill(skillNaamEn) {
-  try {
-    const params = new URLSearchParams({
-      text:            skillNaamEn,
-      language:        'en',
-      type:            'skill',
-      selectedVersion: ESCO_VERSION,
-      limit:           '3',
-    });
-
-    const res = await fetch(`${ESCO_API}/search?${params}`, {
-      headers: { Accept: 'application/json' },
-      signal: AbortSignal.timeout(6000),
-    });
-    if (!res.ok) return null;
-
-    const data = await res.json();
-    const hits = data?._embedded?.results ?? [];
-    if (hits.length === 0) return null;
-
-    const top   = hits[0];
-    const uri   = top?._links?.self?.uri ?? top?.uri ?? '';
-    const code  = uri ? uri.split('/').pop() : null;
-    const score = top.score > 1 ? Math.round(top.score) : Math.round((top.score ?? 0) * 100);
-
-    // Geef NL-label terug als die beschikbaar is, anders Engels
-    const labelNl = top?.preferredLabel?.nl;
-    const labelEn = top?.preferredLabel?.en ?? top.title ?? skillNaamEn;
-    const definitieNl = top?.description?.nl?.literal ?? null;
-    const definitieEn = top?.description?.en?.literal ?? null;
-
-    return {
-      esco_uri:        uri,
-      esco_code:       code,
-      esco_label:      labelNl ?? labelEn,
-      esco_label_en:   labelEn,
-      esco_definitie:  definitieNl ?? definitieEn,
-      esco_matched:    true,
-      esco_confidence: score,
-    };
-  } catch {
-    return null;
-  }
-}
-
-async function verrijkSkillsMetEsco(skillsEnMap) {
-  // skillsEnMap = { "Nederlandse naam": "English search term" }
-  const entries = Object.entries(skillsEnMap);
-  const resultaten = await Promise.allSettled(
-    entries.map(([, en]) => escoZoekSkill(en))
-  );
-  const map = {};
-  entries.forEach(([nl], i) => {
-    map[nl] = resultaten[i].status === 'fulfilled' && resultaten[i].value
-      ? resultaten[i].value
-      : { esco_code: null, esco_label: nl, esco_definitie: null, esco_matched: false, esco_confidence: 0 };
-  });
-  return map;
-}
-
-// ─── Claude API aanroep ───────────────────────────────────────────────────────
+// ─── Claude aanroep ───────────────────────────────────────────────────────────
 
 async function vraagClaude(sys, prompt, apiKey) {
   const res = await fetch(ANTHROPIC_API, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+    headers: {
+      'Content-Type':      'application/json',
+      'x-api-key':         apiKey,
+      'anthropic-version': '2023-06-01',
+    },
     body: JSON.stringify({
       model:      'claude-sonnet-4-6',
       max_tokens: 8192,
@@ -102,105 +79,126 @@ async function vraagClaude(sys, prompt, apiKey) {
     }),
   });
   if (!res.ok) throw new Error(`Claude API fout: ${res.status} — ${await res.text()}`);
-
   const tekst = (await res.json()).content?.[0]?.text ?? '';
-
-  let jsonTekst = tekst;
-  const volledig = tekst.match(/```json\s*([\s\S]*?)```/);
-  if (volledig) {
-    jsonTekst = volledig[1].trim();
-  } else {
+  let j = tekst;
+  const blok = tekst.match(/```json\s*([\s\S]*?)```/);
+  if (blok) j = blok[1].trim();
+  else {
     const open = tekst.match(/```json\s*([\s\S]*)/);
-    if (open) jsonTekst = open[1].trim();
-    else {
-      const raw = tekst.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
-      if (raw) jsonTekst = raw[0];
-    }
+    if (open) j = open[1].trim();
+    else { const raw = tekst.match(/(\{[\s\S]*\}|\[[\s\S]*\])/); if (raw) j = raw[0]; }
   }
-
-  jsonTekst = herstelAfgekapteJson(jsonTekst);
-  try { return JSON.parse(jsonTekst); }
-  catch { throw new Error('Ongeldige JSON van Claude: ' + tekst.slice(0, 400)); }
+  j = herstelJson(j);
+  try { return JSON.parse(j); }
+  catch { throw new Error('Ongeldige JSON van Claude: ' + tekst.slice(0, 300)); }
 }
 
 // ─── Stap 1: Taken genereren ──────────────────────────────────────────────────
 
 async function genereerTaken(functieprofiel, bedrijf, eigenTaal, apiKey) {
-  const sys = `Je bent expert in functie-analyse en skills-based werken. Geef ALLEEN geldige JSON terug, geen markdown omheen.`;
-  const prompt = `Analyseer dit functieprofiel en geef een takenlijst terug als JSON:
+  return vraagClaude(
+    `Je bent expert in functie-analyse. Geef ALLEEN geldige JSON terug, geen markdown.`,
+    `Analyseer dit functieprofiel grondig. Haal ALLE taken op uit het profiel zelf, aangevuld met taken die horen bij dit beroep op basis van sectorkennis.
 
 FUNCTIEPROFIEL: ${functieprofiel}
 ${bedrijf ? `BEDRIJF: ${bedrijf}` : ''}
 ${eigenTaal ? `BEDRIJFSEIGEN TERMEN: ${eigenTaal}` : ''}
 
-JSON-formaat (direct, geen markdown):
-{"functietitel":"string","samenvatting":"max 2 zinnen","vergelijkbare_titels":["string"],"taken":[{"id":"T01","taak":"string","bron":"profiel|beroep|bedrijf","frequentie":"dagelijks|wekelijks|maandelijks","belang":"hoog|middel|laag","geselecteerd":true}]}
+JSON (direct, geen markdown):
+{"functietitel":"string","samenvatting":"max 2 zinnen","vergelijkbare_titels":["string"],"taken":[{"id":"T01","taak":"concrete taakomschrijving","bron":"profiel|beroep|bedrijf","frequentie":"dagelijks|wekelijks|maandelijks","belang":"hoog|middel|laag","geselecteerd":true}]}
 
-Genereer 8-15 taken. Concreet en actiegericht.`;
-  return vraagClaude(sys, prompt, apiKey);
+Genereer 10-15 taken. Wees concreet en volledig — combineer het profiel met beroepskennis.`,
+    apiKey
+  );
 }
 
-// ─── Stap 2: Skills koppelen + ESCO verrijking ────────────────────────────────
+// ─── Stap 2: Skills koppelen via ESCO-selectie ────────────────────────────────
 
 async function koppelSkills(functietitel, taken, bedrijf, eigenTaal, apiKey) {
-  const sys = `Je bent ESCO-expert en skills-analist. Geef ALLEEN geldige JSON terug, geen markdown omheen.
-Voor elke skill geef je ZOWEL een Nederlandse naam (skill_nl) ALS een Engelse ESCO-zoekterm (skill_en).
-De Engelse zoekterm moet overeenkomen met hoe ESCO de skill noemt (bijv. "install electrical systems", "read technical drawings").
-Maximaal 3 hardskills en 2 softskills per taak.`;
+  const { hard, soft } = laadEsco();
+  const { topHard, soft: softList } = selecteerRelevante(functietitel, taken, hard, soft);
 
+  // Maak leesbare lijsten voor Claude
+  const hardLijst = topHard.map(r => `${r[0]}|${r[1]}`).join('\n');
+  const softLijst = softList.map(r => `${r[0]}|${r[1]}`).join('\n');
   const takenTekst = taken.map(t => `- ${t.id}: ${t.taak}`).join('\n');
-  const prompt = `Koppel skills aan taken voor: ${functietitel}
+
+  const resultaat = await vraagClaude(
+    `Je bent ESCO-expert. Geef ALLEEN geldige JSON terug, geen markdown.
+KRITIEKE REGEL: kies skills UITSLUITEND uit de meegestuurde ESCO-lijsten.
+Gebruik de exacte label en code zoals opgegeven. Verzin NOOIT zelf skills.
+MAX 3 hardskills en 2 softskills per taak.`,
+
+    `Koppel ESCO-skills aan taken voor: ${functietitel}
 
 TAKEN:
 ${takenTekst}
 ${bedrijf ? `BEDRIJF: ${bedrijf}` : ''}
-${eigenTaal ? `BEDRIJFSEIGEN TERMEN (eigen:true): ${eigenTaal}` : ''}
+${eigenTaal ? `BEDRIJFSEIGEN TERMEN (markeer als eigen:true): ${eigenTaal}` : ''}
 
-JSON-formaat (direct, geen markdown):
+BESCHIKBARE HARDSKILLS (label|code):
+${hardLijst}
+
+BESCHIKBARE SOFTSKILLS (label|code):
+${softLijst}
+
+JSON (direct, geen markdown):
 {
   "kerncompetenties": [{"naam":"string","omschrijving":"string","toelichting":"string"}],
   "taken": [{
     "id": "T01",
     "hardskills": [{
-      "skill": "Nederlandse naam",
-      "skill_en": "English ESCO search term",
+      "skill": "exacte label uit de lijst",
+      "esco_code": "exacte code uit de lijst",
       "niveau": "Basis|Gevorderd|Expert",
       "bron": "profiel|beroep|bedrijf",
-      "toelichting": "kort",
+      "toelichting": "waarom relevant",
       "eigen": false
     }],
     "softskills": [{
-      "softskill": "Nederlandse naam",
-      "softskill_en": "English ESCO search term",
+      "softskill": "exacte label uit de lijst",
+      "esco_code": "exacte code uit de lijst",
       "niveau": "Basis|Gevorderd|Expert",
       "bron": "profiel|beroep|bedrijf",
-      "toelichting": "kort",
+      "toelichting": "waarom relevant",
       "eigen": false
     }]
   }]
-}`;
+}`,
+    apiKey
+  );
 
-  const resultaat = await vraagClaude(sys, prompt, apiKey);
-
-  // Bouw NL→EN maps voor ESCO lookup
-  const hardMap = {};
-  const softMap = {};
-  (resultaat.taken ?? []).forEach(t => {
-    (t.hardskills ?? []).forEach(s => { if (!hardMap[s.skill]) hardMap[s.skill] = s.skill_en ?? s.skill; });
-    (t.softskills ?? []).forEach(s => { if (!softMap[s.softskill]) softMap[s.softskill] = s.softskill_en ?? s.softskill; });
+  // Bouw ESCO-lookup voor verificatie en label-invulling
+  const escoLookup = {};
+  [...hard, ...soft].forEach(r => {
+    escoLookup[r[1]] = { esco_label: r[0], esco_uri: `http://data.europa.eu/esco/skill/${r[1]}`, esco_matched: true };
   });
 
-  const [escoHard, escoSoft] = await Promise.all([
-    verrijkSkillsMetEsco(hardMap),
-    verrijkSkillsMetEsco(softMap),
-  ]);
-
+  // Verrijk resultaat met ESCO-data (label + uri uit lookup, niet van Claude)
   return {
     ...resultaat,
     taken: (resultaat.taken ?? []).map(taak => ({
       ...taak,
-      hardskills: (taak.hardskills ?? []).map(s => ({ ...s, ...(escoHard[s.skill] ?? {}) })),
-      softskills: (taak.softskills ?? []).map(s => ({ ...s, ...(escoSoft[s.softskill] ?? {}) })),
+      hardskills: (taak.hardskills ?? []).map(s => {
+        const lookup = escoLookup[s.esco_code] ?? {};
+        return {
+          ...s,
+          esco_label:   lookup.esco_label  ?? s.skill,
+          esco_uri:     lookup.esco_uri    ?? null,
+          esco_matched: lookup.esco_matched ?? false,
+          esco_confidence: lookup.esco_matched ? 100 : 0,
+        };
+      }),
+      softskills: (taak.softskills ?? []).map(s => {
+        const lookup = escoLookup[s.esco_code] ?? {};
+        return {
+          ...s,
+          esco_label:   lookup.esco_label  ?? s.softskill,
+          esco_uri:     lookup.esco_uri    ?? null,
+          esco_matched: lookup.esco_matched ?? false,
+          esco_confidence: lookup.esco_matched ? 100 : 0,
+        };
+      }),
     })),
   };
 }
@@ -229,7 +227,7 @@ export default async function handler(req, res) {
     }
     return res.status(400).json({ error: `Onbekende stap: ${stap}` });
   } catch (e) {
-    console.error('Fout:', e);
+    console.error('Fout:', e.message);
     return res.status(500).json({ error: e.message });
   }
 }
