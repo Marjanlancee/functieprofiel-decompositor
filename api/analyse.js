@@ -34,7 +34,7 @@ function selecteerRelevante(functietitel, taken, hard, soft) {
   });
 
   gescoord.sort((a, b) => b.score - a.score);
-  const topHard = gescoord.slice(0, 400).map(g => g.row);
+  const topHard = gescoord.slice(0, 300).map(g => g.row);
 
   return { topHard, soft };
 }
@@ -71,7 +71,7 @@ async function vraagClaude(sys, prompt, apiKey) {
     },
     body: JSON.stringify({
       model:      'claude-sonnet-4-6',
-      max_tokens: 8192,
+      max_tokens: 16000,
       system:     sys,
       messages:   [{ role: 'user', content: prompt }],
     }),
@@ -120,8 +120,8 @@ async function koppelSkills(functietitel, taken, bedrijf, eigenTaal, apiKey) {
   const { topHard, soft: softList } = selecteerRelevante(functietitel, taken, hard, soft);
 
   // Stuur label|code|definitie mee zodat Claude ook de definitie kent
-  const hardLijst = topHard.map(r => `${r[0]}|${r[1]}|${r[4] ? r[4].slice(0,80) : ''}`).join('\n');
-  const softLijst = softList.map(r => `${r[0]}|${r[1]}|${r[4] ? r[4].slice(0,80) : ''}`).join('\n');
+  const hardLijst = topHard.map(r => `${r[0]}|${r[1]}`).join('\n');
+  const softLijst = softList.map(r => `${r[0]}|${r[1]}`).join('\n');
   const takenTekst = taken.map(t => `- ${t.id}: ${t.taak}`).join('\n');
 
   const resultaat = await vraagClaude(
