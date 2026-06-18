@@ -220,7 +220,6 @@ function App() {
     const map = new Map();
     (skillsData.taken||[]).flatMap(t=>(t.hardskills||[]).map(s=>({...s,niveau:getNiveau(t.id,s.skill,s.niveau),taakId:t.id}))).forEach(s=>{
       if (!map.has(s.skill)||(!map.get(s.skill).esco_code&&s.esco_code)) map.set(s.skill,s);
-      }
     });
     eigenTermenLijst.forEach(term => {
       if (!map.has(term)) map.set(term,{skill:term,niveau:"Gevorderd",bron:"bedrijf",eigen:true,lightcast_id:null,lightcast_label:null,lightcast_matched:false});
@@ -232,7 +231,6 @@ function App() {
     const map = new Map();
     (skillsData.taken||[]).flatMap(t=>(t.softskills||[]).map(s=>({...s,niveau:getNiveau(t.id,`soft-${s.softskill}`,s.niveau||"Gevorderd")}))).forEach(s=>{
       if (!map.has(s.softskill)||(!map.get(s.softskill).esco_code&&s.esco_code)) map.set(s.softskill,s);
-      }
     });
     return [...map.values()];
   })() : [];
