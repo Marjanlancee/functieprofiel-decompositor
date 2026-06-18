@@ -3,11 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Functieprofiel Decompositor</title>
+<title>Taakanalyse Skills ESCO</title>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist+Mono:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -89,7 +90,7 @@ textarea::placeholder{color:var(--border-s)}
 .pd{width:5px;height:5px;border-radius:50%;flex-shrink:0}
 .esco-badge{background:#e8f0fe;color:#1a56db;border:1px solid #93b4fd;padding:1px 5px;border-radius:2px;font-size:8px;margin-left:3px;font-weight:500}
 .eigen-badge{background:#f3e8ff;color:#6b21a8;border:1px solid #c084fc;padding:1px 5px;border-radius:2px;font-size:8px;margin-left:3px}
-.no-esco{background:#f5f5f5;color:#999;border:1px solid #ddd;padding:1px 5px;border-radius:2px;font-size:8px;margin-left:3px}
+.no-match{background:#f5f5f5;color:#999;border:1px solid #ddd;padding:1px 5px;border-radius:2px;font-size:8px;margin-left:3px}
 .sk-card{border:1px solid var(--border);background:var(--surface);border-radius:2px;padding:9px 11px;display:flex;flex-direction:column;gap:6px}
 .sk-top{display:flex;align-items:center;gap:6px}
 .sk-name{font-size:11px;flex:1}
@@ -144,11 +145,34 @@ function App() {
   const [openTask, setOpenTask] = useState(null);
 
   const [selectedDef, setSelectedDef] = useState({});
+  const [bronnen, setBronnen] = useState("");
+  const [bronnenOpen, setBronnenOpen] = useState(false);
+  const [bronnenStatus, setBronnenStatus] = useState([]);
+  const [pdfTekst, setPdfTekst] = useState("");
+  const [pdfNaam, setPdfNaam] = useState("");
+  const [uitgebreid, setUitgebreid] = useState(false);
 
   const heeftEigen = eigenTaal.trim().length > 0;
   const geselecteerdeTaken = taken.filter(t => t.geselecteerd);
   const getNiveau = (tid, skill, orig) => overrides[`${tid}-${skill}`] || orig;
   const setNiveau = (tid, skill, n) => setOverrides(p => ({...p,[`${tid}-${skill}`]:n}));
+
+  const leesUitPdf = (file) => {
+    if (!file || !file.type.includes('pdf')) return;
+    setPdfNaam(file.name);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      // Eenvoudige tekst extractie uit PDF bytes
+      const arr = new Uint8Array(e.target.result);
+      let raw = '';
+      for (let i = 0; i < arr.length; i++) raw += String.fromCharCode(arr[i]);
+      // Zoek leesbare tekst blokken
+      const matches = raw.match(/[A-Za-zÀ-ɏ\s\d.,;:!?()%-]{30,}/g) || [];
+      const tekst = matches.join(' ').replace(/\s+/g, ' ').trim().slice(0, 8000);
+      setPdfTekst(tekst);
+    };
+    reader.readAsArrayBuffer(file);
+  };
 
   const analyseerTaken = async () => {
     if (!input.trim()) return;
@@ -156,7 +180,7 @@ function App() {
     try {
       const res = await fetch('/api/analyse', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ stap:1, functieprofiel:input, bedrijf, eigenTaal })
+        body: JSON.stringify({ stap:1, functieprofiel:input, bedrijf, eigenTaal, bronnen: bronnen.trim() ? bronnen.split('\n').map(b=>b.trim()).filter(Boolean) : [], pdfTekst: pdfTekst||'' })
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
@@ -164,6 +188,7 @@ function App() {
       setSamenvatting(data.samenvatting || "");
       setVergelijkbareTitels(data.vergelijkbare_titels || []);
       setTaken(data.taken || []);
+      setBronnenStatus(data.bronnenStatus || []);
       setStap(1);
     } catch(e) { setError(e.message); }
     finally { setLoading(false); }
@@ -195,9 +220,10 @@ function App() {
     const map = new Map();
     (skillsData.taken||[]).flatMap(t=>(t.hardskills||[]).map(s=>({...s,niveau:getNiveau(t.id,s.skill,s.niveau),taakId:t.id}))).forEach(s=>{
       if (!map.has(s.skill)||(!map.get(s.skill).esco_code&&s.esco_code)) map.set(s.skill,s);
+      }
     });
     eigenTermenLijst.forEach(term => {
-      if (!map.has(term)) map.set(term,{skill:term,niveau:"Gevorderd",bron:"bedrijf",eigen:true,esco_code:null,esco_label:null,esco_matched:false});
+      if (!map.has(term)) map.set(term,{skill:term,niveau:"Gevorderd",bron:"bedrijf",eigen:true,lightcast_id:null,lightcast_label:null,lightcast_matched:false});
     });
     return [...map.values()];
   })() : [];
@@ -206,12 +232,222 @@ function App() {
     const map = new Map();
     (skillsData.taken||[]).flatMap(t=>(t.softskills||[]).map(s=>({...s,niveau:getNiveau(t.id,`soft-${s.softskill}`,s.niveau||"Gevorderd")}))).forEach(s=>{
       if (!map.has(s.softskill)||(!map.get(s.softskill).esco_code&&s.esco_code)) map.set(s.softskill,s);
+      }
     });
     return [...map.values()];
   })() : [];
 
   const selHard = alleHardskills.filter(s=>selectedDef[`h-${s.skill}`]);
   const selSoft = alleSoftskills.filter(s=>selectedDef[`s-${s.softskill}`]);
+
+  const exportWord = async () => {
+    try {
+      // Wacht tot JSZip geladen is
+      let tries = 0;
+      while (typeof JSZip === 'undefined' && tries < 30) {
+        await new Promise(r => setTimeout(r, 100));
+        tries++;
+      }
+      if (typeof JSZip === 'undefined') {
+        alert('Word export library niet geladen. Herlaad de pagina en probeer opnieuw.');
+        return;
+      }
+
+      const datum = new Date().toLocaleDateString('nl-NL');
+      const jaar = new Date().getFullYear();
+
+      // Genereer uitgebreide functieomschrijving indien gewenst
+      let uitgebreideOmschrijving = '';
+      if (uitgebreid) {
+        try {
+          const bronLijst = bronnen.trim() ? bronnen.split('\n').filter(b=>b.trim()).join(', ') : '';
+          const res = await fetch('/api/analyse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              stap: 3,
+              functietitel,
+              functieprofiel: input,
+              samenvatting,
+              taken: geselecteerdeTaken,
+              skills: { hard: selHard, soft: selSoft },
+              bedrijf,
+              bronnen: bronLijst,
+            })
+          });
+          const data = await res.json();
+          if (data.omschrijving) uitgebreideOmschrijving = data.omschrijving;
+        } catch(e) {
+          console.error('Omschrijving genereren mislukt:', e);
+        }
+      }
+      const skillsPerTaak = new Map();
+      if (skillsData) (skillsData.taken||[]).forEach(t => skillsPerTaak.set(t.id, t));
+      const geselecteerdeHardNames = new Set(selHard.map(s=>s.skill));
+      const geselecteerdeSoftNames = new Set(selSoft.map(s=>s.softskill));
+      const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+      // ── Titelblok ──────────────────────────────────────────────────────────
+      const titelBlok = `
+  <w:p><w:pPr><w:pStyle w:val="Kop1"/><w:spacing w:before="0" w:after="120"/></w:pPr>
+    <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="40"/><w:color w:val="1F3864"/></w:rPr>
+      <w:t>Taakanalyse: ${esc(functietitel)}</w:t></w:r></w:p>
+  <w:p><w:pPr><w:spacing w:before="0" w:after="80"/></w:pPr>
+    <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="20"/><w:color w:val="444444"/></w:rPr>
+      <w:t xml:space="preserve">Bedrijf: ${esc(bedrijf||'—')}     |     Datum: ${esc(datum)}     |     Bright Work Solutions</w:t></w:r></w:p>
+  <w:p><w:pPr><w:spacing w:before="0" w:after="200"/></w:pPr>
+    <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="22"/><w:i/><w:color w:val="555555"/></w:rPr>
+      <w:t>${esc(samenvatting||'')}</w:t></w:r></w:p>`;
+
+      // ── Uitgebreide omschrijving (optioneel) ──────────────────────────────
+      const omschrijvingBlok = uitgebreideOmschrijving ? uitgebreideOmschrijving.split('\n\n').map(alinea =>
+        `<w:p><w:pPr><w:spacing w:before="0" w:after="120"/></w:pPr>
+          <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="22"/></w:rPr>
+            <w:t xml:space="preserve">${alinea.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</w:t></w:r></w:p>`
+      ).join('') : '';
+
+      // ── Taken & Skills tabel ───────────────────────────────────────────────
+      let taakRijen = `
+    <w:tr>
+      <w:trPr><w:trHeight w:val="400"/></w:trPr>
+      <w:tc><w:tcPr><w:tcW w:w="500" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="1F3864"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
+        <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="18"/><w:color w:val="FFFFFF"/></w:rPr><w:t>Nr</w:t></w:r></w:p></w:tc>
+      <w:tc><w:tcPr><w:tcW w:w="3000" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="1F3864"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
+        <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="18"/><w:color w:val="FFFFFF"/></w:rPr><w:t>Taak</w:t></w:r></w:p></w:tc>
+      <w:tc><w:tcPr><w:tcW w:w="900" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="1F3864"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
+        <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="18"/><w:color w:val="FFFFFF"/></w:rPr><w:t>Type</w:t></w:r></w:p></w:tc>
+      <w:tc><w:tcPr><w:tcW w:w="2000" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="1F3864"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
+        <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="18"/><w:color w:val="FFFFFF"/></w:rPr><w:t>Skill (NL)</w:t></w:r></w:p></w:tc>
+      <w:tc><w:tcPr><w:tcW w:w="1800" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="1F3864"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
+        <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="18"/><w:color w:val="FFFFFF"/></w:rPr><w:t>Skill (EN)</w:t></w:r></w:p></w:tc>
+      <w:tc><w:tcPr><w:tcW w:w="900" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="1F3864"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
+        <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="18"/><w:color w:val="FFFFFF"/></w:rPr><w:t>Niveau</w:t></w:r></w:p></w:tc>
+    </w:tr>`;
+
+      geselecteerdeTaken.forEach((taak, ti) => {
+        const st = skillsPerTaak.get(taak.id);
+        const hs = st ? (st.hardskills||[]).filter(s=>geselecteerdeHardNames.has(s.skill)) : [];
+        const ss = st ? (st.softskills||[]).filter(s=>geselecteerdeSoftNames.has(s.softskill)) : [];
+        const all = [
+          ...hs.map(s=>({ type:'Hard', naam:s.skill, naam_en:s.esco_label||'', niveau:getNiveau(taak.id,s.skill,s.niveau), definitie:s.esco_definitie||'' })),
+          ...ss.map(s=>({ type:'Soft', naam:s.softskill, naam_en:s.esco_label||'', niveau:getNiveau(taak.id,`soft-${s.softskill}`,s.niveau||'Gevorderd'), definitie:s.esco_definitie||'' }))
+        ];
+        if (all.length === 0) return;
+        const fill = ti%2===0 ? 'EEF2F7' : 'FFFFFF';
+        all.forEach((s, si) => {
+          taakRijen += `
+    <w:tr>
+      <w:tc><w:tcPr><w:tcW w:w="500" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="${fill}"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
+        <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="18"/><w:b/></w:rPr><w:t>${si===0?String(ti+1).padStart(2,'0'):''}</w:t></w:r></w:p></w:tc>
+      <w:tc><w:tcPr><w:tcW w:w="3000" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="${fill}"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
+        <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="18"/></w:rPr><w:t xml:space="preserve">${si===0?esc(taak.taak):''}</w:t></w:r></w:p></w:tc>
+      <w:tc><w:tcPr><w:tcW w:w="900" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="${fill}"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
+        <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="18"/><w:color w:val="${s.type==='Hard'?'1F3864':'C4860A'}"/></w:rPr><w:t>${esc(s.type)}</w:t></w:r></w:p></w:tc>
+      <w:tc><w:tcPr><w:tcW w:w="2000" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="${fill}"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
+        <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="18"/></w:rPr><w:t xml:space="preserve">${esc(s.naam)}</w:t></w:r></w:p>
+        ${s.definitie?`<w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="16"/><w:i/><w:color w:val="777777"/></w:rPr><w:t xml:space="preserve">${esc(s.definitie.slice(0,120))}${s.definitie.length>120?'...':''}</w:t></w:r></w:p>`:''}
+        </w:tc>
+      <w:tc><w:tcPr><w:tcW w:w="1800" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="${fill}"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
+        <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="16"/><w:color w:val="666666"/></w:rPr><w:t xml:space="preserve">${esc(s.naam_en)}</w:t></w:r></w:p></w:tc>
+      <w:tc><w:tcPr><w:tcW w:w="900" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="${fill}"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
+        <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="18"/></w:rPr><w:t>${esc(s.niveau)}</w:t></w:r></w:p></w:tc>
+    </w:tr>`;
+        });
+      });
+
+
+
+      const docXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<w:body>
+
+  ${titelBlok}
+  ${omschrijvingBlok}
+
+  <w:p><w:pPr><w:spacing w:before="240" w:after="80"/></w:pPr>
+    <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="28"/><w:color w:val="1F3864"/></w:rPr>
+      <w:t>1. Taken en bijbehorende skills</w:t></w:r></w:p>
+
+  <w:tbl>
+    <w:tblPr>
+      <w:tblW w:w="9100" w:type="dxa"/>
+      <w:tblBorders>
+        <w:top w:val="single" w:sz="4" w:space="0" w:color="C8D4E8"/>
+        <w:left w:val="single" w:sz="4" w:space="0" w:color="C8D4E8"/>
+        <w:bottom w:val="single" w:sz="4" w:space="0" w:color="C8D4E8"/>
+        <w:right w:val="single" w:sz="4" w:space="0" w:color="C8D4E8"/>
+        <w:insideH w:val="single" w:sz="4" w:space="0" w:color="C8D4E8"/>
+        <w:insideV w:val="single" w:sz="4" w:space="0" w:color="C8D4E8"/>
+      </w:tblBorders>
+      <w:tblCellMar><w:top w:w="0" w:type="dxa"/><w:left w:w="0" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="0" w:type="dxa"/></w:tblCellMar>
+    </w:tblPr>
+    <w:tblGrid>
+      <w:gridCol w:w="500"/><w:gridCol w:w="3000"/><w:gridCol w:w="900"/>
+      <w:gridCol w:w="2000"/><w:gridCol w:w="1800"/><w:gridCol w:w="900"/>
+    </w:tblGrid>
+    ${taakRijen}
+  </w:tbl>
+
+  <w:p><w:pPr><w:spacing w:before="320" w:after="80"/></w:pPr>
+    <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="28"/><w:color w:val="1F3864"/></w:rPr>
+      <w:t>2. Geraadpleegde bronnen</w:t></w:r></w:p>
+  <w:p><w:pPr><w:spacing w:before="0" w:after="80"/></w:pPr>
+    <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="20"/></w:rPr>
+      <w:t>ESCO database. (${jaar}). European Skills, Competences, Qualifications and Occupations. Geraadpleegd op ${esc(datum)}, van https://esco.ec.europa.eu</w:t></w:r></w:p>
+  <w:p><w:pPr><w:spacing w:before="0" w:after="80"/></w:pPr>
+    <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="20"/></w:rPr>
+      <w:t>Anthropic. (${jaar}). Claude AI (claude-sonnet-4-6). Geraadpleegd op ${esc(datum)}, van https://www.anthropic.com</w:t></w:r></w:p>
+  ${bronnen.trim() ? bronnen.split('\n').filter(b=>b.trim()).map(b=>`
+  <w:p><w:pPr><w:spacing w:before="0" w:after="80"/></w:pPr>
+    <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="20"/></w:rPr>
+      <w:t xml:space="preserve">${esc(b.trim())}. Geraadpleegd op ${esc(datum)}.</w:t></w:r></w:p>`).join('') : ''}
+  ${pdfNaam ? `
+  <w:p><w:pPr><w:spacing w:before="0" w:after="80"/></w:pPr>
+    <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="20"/></w:rPr>
+      <w:t xml:space="preserve">${esc(pdfNaam)} [PDF upload]. Geraadpleegd op ${esc(datum)}.</w:t></w:r></w:p>` : ''}
+
+  <w:sectPr>
+    <w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/>
+    <w:pgMar w:top="1080" w:right="1080" w:bottom="1080" w:left="1080" w:header="0" w:footer="0" w:gutter="0"/>
+  </w:sectPr>
+</w:body>
+</w:document>`;
+
+      const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:docDefaults><w:rPrDefault><w:rPr>
+    <w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>
+    <w:sz w:val="22"/><w:lang w:val="nl-NL"/>
+  </w:rPr></w:rPrDefault></w:docDefaults>
+  <w:style w:type="paragraph" w:styleId="Normal"><w:name w:val="Normal"/>
+    <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="22"/></w:rPr></w:style>
+  <w:style w:type="paragraph" w:styleId="Kop1"><w:name w:val="heading 1"/>
+    <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="40"/><w:color w:val="1F3864"/></w:rPr></w:style>
+  <w:style w:type="paragraph" w:styleId="Kop2"><w:name w:val="heading 2"/>
+    <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="28"/><w:color w:val="1F3864"/></w:rPr></w:style>
+</w:styles>`;
+
+      const zip = new JSZip();
+      zip.file('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>');
+      zip.file('_rels/.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
+      zip.file('word/document.xml', docXml);
+      zip.file('word/styles.xml', stylesXml);
+      zip.file('word/_rels/document.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>');
+
+      const blob = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Taakanalyse_${(bedrijf||'').replace(/\s/g,'_')}_${functietitel.replace(/\s/g,'_')}_${datum.replace(/\//g,'-')}.docx`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+    } catch(e) {
+      console.error('Word export fout:', e);
+      alert('Word export mislukt: ' + e.message);
+    }
+  };
 
   const exportExcel = () => {
     const wb = XLSX.utils.book_new();
@@ -227,27 +463,27 @@ function App() {
     ];
     const skillsPerTaak = new Map();
     if (skillsData) (skillsData.taken||[]).forEach(t => skillsPerTaak.set(t.id,t));
+    // Alleen geselecteerde skills exporteren
+    const geselecteerdeHardNames = new Set(selHard.map(s=>s.skill));
+    const geselecteerdeSoftNames = new Set(selSoft.map(s=>s.softskill));
     geselecteerdeTaken.forEach(taak => {
       const st = skillsPerTaak.get(taak.id);
-      const hs = st ? (st.hardskills||[]) : [];
-      const ss = st ? (st.softskills||[]) : [];
+      const hs = st ? (st.hardskills||[]).filter(s=>geselecteerdeHardNames.has(s.skill)) : [];
+      const ss = st ? (st.softskills||[]).filter(s=>geselecteerdeSoftNames.has(s.softskill)) : [];
       const all = [
         ...hs.map(s=>({...s,type:'Hard',naam:s.skill,niveau:getNiveau(taak.id,s.skill,s.niveau)})),
         ...ss.map(s=>({...s,type:'Soft',naam:s.softskill,niveau:getNiveau(taak.id,`soft-${s.softskill}`,s.niveau||'Gevorderd')}))
       ];
-      if (all.length===0) {
-        rows.push([taak.id,taak.taak,'','','','','','',taak.bron,taak.frequentie,taak.belang]);
-      } else {
-        all.forEach((s,i) => rows.push([
-          i===0?taak.id:'', i===0?taak.taak:'',
-          s.type, s.naam,
-          s.esco_label||s.naam,
-          s.esco_definitie||'',
-          s.esco_uri||'',
-          s.niveau,
-          i===0?taak.bron:'', i===0?taak.frequentie:'', i===0?taak.belang:''
-        ]));
-      }
+      if (all.length===0) return;
+      all.forEach((s,i) => rows.push([
+        i===0?taak.id:'', i===0?taak.taak:'',
+        s.type, s.naam,
+        s.naam_en||'',
+        s.lightcast_definitie||'',
+        s.lightcast_id||'',
+        s.niveau,
+        i===0?taak.bron:'', i===0?taak.frequentie:'', i===0?taak.belang:''
+      ]));
     });
     const ws = XLSX.utils.aoa_to_sheet(rows);
     ws['!cols'] = [{wch:4},{wch:45},{wch:6},{wch:35},{wch:35},{wch:55},{wch:60},{wch:12},{wch:10},{wch:12},{wch:8}];
@@ -255,7 +491,7 @@ function App() {
 
     // ── Tabblad 2: Methodiek ────────────────────────────────────────────────
     const meta = [
-      ['METHODIEK — Functieprofiel Decompositor',''],
+      ['METHODIEK — Taakanalyse Skills ESCO',''],
       ['Bright Work Solutions',''],
       ['',''],
       ['ONDERDEEL','TOELICHTING'],
@@ -263,16 +499,15 @@ function App() {
       ['Frequentie (dagelijks / wekelijks / maandelijks)','Claude schat de frequentie op basis van de aard van de taak. Operationele uitvoeringstaken zijn doorgaans dagelijks, coördinatie- en overlegtaken wekelijks, strategische of rapportagetaken maandelijks. Dit is een modelschatting, geen vaste norm.'],
       ['Bron van beroepen en sectoren','Trainingsdata van Claude — bestaande uit functieomschrijvingen, cao-teksten, beroepsgidsen, sectorrapportages en internationale arbeidsmarktbronnen zoals O*NET (VS) en ISCO (ILO). De tool combineert het ingevoerde profiel met deze achtergrondkennis.'],
       ['Skills — databron','Alle skills komen uit de officiële ESCO-database (European Skills, Competences, Qualifications and Occupations) van de Europese Commissie, versie 1.2, Nederlands. Zie: https://esco.ec.europa.eu'],
-      ['Skills — selectie (max. 300 per analyse)','Uit de volledige ESCO-database van ca. 14.000 skills worden per analyse de 300 meest relevante geselecteerd op basis van woordoverlap met de functietitel en de gegenereerde taken. Skills met de hoogste overlap krijgen prioriteit. Claude kiest vervolgens uit deze gefilterde lijst — niet daarbuiten.'],
-      ['ESCO Definitie','De definities komen rechtstreeks uit de officiële ESCO-datadump (veld: description). Ze zijn niet bewerkt of vertaald — dit zijn de originele Nederlandse ESCO-beschrijvingen.'],
-      ['ESCO URI','De ESCO URI is de unieke, permanente identifier van elke skill in de Europese database, bijv. http://data.europa.eu/esco/skill/722be5b6-3a2f-... Via deze URI is de skill direct opzoekbaar op het ESCO-portaal (https://esco.ec.europa.eu).'],
+      ['Skills — selectie (max. 300 per analyse)','Uit de ESCO-database van ca. 14.000 skills worden per analyse de 300 meest relevante geselecteerd op basis van woordoverlap met de functietitel en de gegenereerde taken.'],
+      ['ESCO Definitie','De definities komen rechtstreeks uit de officiële ESCO-datadump (veld: description). Dit zijn de originele Nederlandse ESCO-beschrijvingen.'],
+      ['ESCO URI','De ESCO URI is de unieke, permanente identifier van elke skill in de Europese database. Via deze URI is de skill opzoekbaar op het ESCO-portaal (https://esco.ec.europa.eu).'],
       ['Ook bekend als (vergelijkbare titels)','Gangbare synoniemen en functietitelvarianten gegenereerd door Claude op basis van trainingsdata (functieomschrijvingen, arbeidsmarktliteratuur). Dit zijn modelinschattingen van verwante titels — geen gestandaardiseerde bron.'],
       ['Niveaus (Basis / Gevorderd / Expert)','Claude schat het vereiste niveau per skill per taak in op basis van de taakomschrijving en de context van het profiel. De gebruiker kan niveaus aanpassen via sliders in stap 2. Basis = uitvoerend, onder begeleiding; Gevorderd = zelfstandig, ook complexe situaties; Expert = strategisch, begeleidt anderen.'],
-      ['Bedrijfseigen termen','Termen die de gebruiker zelf invoert als bedrijfsspecifieke competenties of kernwaarden. Deze worden niet gematcht op ESCO, maar als eigen skill toegevoegd aan de skillset. Herkenbaar via het paarse "Bedrijf"-label.'],
+      ['Bedrijfseigen termen','Termen die de gebruiker zelf invoert als bedrijfsspecifieke competenties of kernwaarden. Deze worden niet gematcht op Lightcast, maar als eigen skill toegevoegd aan de skillset. Herkenbaar via het paarse "Bedrijf"-label.'],
       ['',''],
       ['BRONVERMELDING',''],
       ['ESCO database','https://esco.ec.europa.eu/nl'],
-      ['ESCO datadump NL (download)','https://esco.ec.europa.eu/en/use-esco/download'],
       ['O*NET Online (referentie)','https://www.onetonline.org'],
       ['ISCO-08 (referentie)','https://www.ilo.org/ilostat-files/ISCO/newdocs-08-2012/ISCO-08-EN.pdf'],
     ];
@@ -280,7 +515,7 @@ function App() {
     wsMeta['!cols'] = [{wch:35},{wch:90}];
     XLSX.utils.book_append_sheet(wb, wsMeta, 'Methodiek');
 
-    XLSX.writeFile(wb,`Skillset_${bedrijf?bedrijf.replace(/\s/g,'_')+'_':''}${functietitel.replace(/\s/g,'_')}_${datum.replace(/\//g,'-')}.xlsx`);
+    XLSX.writeFile(wb,`Skillset_Lightcast_${bedrijf?bedrijf.replace(/\s/g,'_')+'_':''}${functietitel.replace(/\s/g,'_')}_${datum.replace(/\//g,'-')}.xlsx`);
   };
 
   const D = NIVEAU;
@@ -289,7 +524,7 @@ function App() {
       <img src="/logo.png" alt="Bright Work Solutions" className="header-logo"/>
       <div className="header-titles">
         <div className="eyebrow">ESCO-aligned · Skills Analyse Tool</div>
-        <div className="site-title"><span>Functie</span>profiel <em>Decompositor</em></div>
+        <div className="site-title"><span>Taakanalyse</span> Skills <em>ESCO</em></div>
       </div>
       <div className="header-bedrijf">
         <input className="field" value={bedrijf} onChange={e=>setBedrijf(e.target.value)} placeholder="Bedrijfsnaam" style={{width:180,fontSize:11}}/>
@@ -316,6 +551,38 @@ function App() {
         </div>
 
         <div>
+          <button className={`toggle-btn ${bronnenOpen?"open":""}`} onClick={()=>setBronnenOpen(o=>!o)}
+            style={bronnenOpen?{borderColor:"#0ea5e9",color:"#0369a1",background:"#f0f9ff",borderRadius:"2px 2px 0 0"}:{}}>
+            <span>Aanvullende bronnen</span>
+            <span>{bronnenOpen?"▲":"▼"}{bronnen.trim()&&<span style={{background:"#e0f2fe",color:"#0369a1",border:"1px solid #7dd3fc",padding:"1px 5px",borderRadius:2,fontSize:9,marginLeft:6}}>Actief</span>}</span>
+          </button>
+          {bronnenOpen&&<div style={{border:"1px solid #0ea5e9",borderTop:"none",padding:10,background:"#f0f9ff",display:"flex",flexDirection:"column",gap:8,borderRadius:"0 0 2px 2px"}}>
+            <div>
+              <label className="slabel" style={{color:"#0369a1"}}>URLs van bronnen — één per regel, beginnen met https://</label>
+              <textarea rows={5} value={bronnen} onChange={e=>setBronnen(e.target.value)}
+                placeholder={"https://www.bedrijf.nl/over-ons\nhttps://www.bedrijf.nl/jaarverslag.pdf\nhttps://www.kadaster.nl/..."} style={{minHeight:"auto",fontSize:11}}/>
+              <div style={{fontSize:9,color:"#0369a1",marginTop:6,lineHeight:1.7,background:"#e0f2fe",padding:"8px 10px",borderRadius:2}}>
+Vul één URL per regel in, altijd beginnend met https://. Max 5 bronnen.
+              </div>
+            </div>
+            <div>
+              <label className="slabel" style={{color:"#0369a1"}}>Of upload een PDF (jaarverslag, rapport)</label>
+              <label style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",border:"1px dashed #7dd3fc",borderRadius:2,cursor:"pointer",background:"white",fontSize:10,color:"#0369a1"}}>
+                <span>📄</span>
+                <span>{pdfNaam || "Klik om een PDF te selecteren"}</span>
+                <input type="file" accept=".pdf" style={{display:"none"}} onChange={e=>leesUitPdf(e.target.files[0])}/>
+              </label>
+              {pdfTekst&&<div style={{fontSize:9,color:"#2d6a4f",marginTop:4,padding:"4px 8px",background:"#f0faf2",borderRadius:2}}>
+                ✓ PDF gelezen — {pdfTekst.length} tekens gevonden
+              </div>}
+              {pdfNaam&&!pdfTekst&&<div style={{fontSize:9,color:"#9b2226",marginTop:4}}>
+                ⚠ Geen tekst gevonden in PDF
+              </div>}
+            </div>
+          </div>}
+        </div>
+
+        <div>
           <label className="slabel">Functieprofiel invoer</label>
           <textarea rows={9} value={input} onChange={e=>setInput(e.target.value)}
             placeholder={"Plak hier een functieprofiel,\nvacaturetekst of\ntaakomschrijving..."}/>
@@ -335,7 +602,7 @@ function App() {
           {stap>=2&&<button className="btn-main" onClick={()=>setStap(3)} style={{background:"#1a56db"}}>
             Stap 3: Definitieve skillset →
           </button>}
-          <button className="btn-ghost" onClick={()=>{setStap(0);setTaken([]);setSkillsData(null);setOverrides({});setSelectedDef({});}}>
+          <button className="btn-ghost" onClick={()=>{setStap(0);setTaken([]);setSkillsData(null);setOverrides({});setSelectedDef({});setPdfTekst('');setPdfNaam('');}}>
             ↺ Opnieuw beginnen
           </button>
         </>}
@@ -347,6 +614,7 @@ function App() {
           <div className="li"><span style={{fontSize:10}}>📄</span><div><div style={{fontWeight:500}}>Profiel</div><div style={{fontSize:9,color:"var(--muted)"}}>Uit vacature/functieprofiel</div></div></div>
           <div className="li"><span style={{fontSize:10}}>🔧</span><div><div style={{fontWeight:500}}>Beroep</div><div style={{fontSize:9,color:"var(--muted)"}}>Uit beroeps-/sectorkennis</div></div></div>
           <div className="li"><span style={{fontSize:10}}>🏢</span><div><div style={{fontWeight:500}}>Bedrijf</div><div style={{fontSize:9,color:"var(--muted)"}}>Jouw bedrijfsskills</div></div></div>
+          <div className="li"><span style={{fontSize:10}}>🔗</span><div><div style={{fontWeight:500}}>Bron</div><div style={{fontSize:9,color:"var(--muted)"}}>Uit aanvullende bronnen</div></div></div>
           <div style={{borderTop:"1px solid var(--border)",paddingTop:10,marginTop:6}}>
             <label className="slabel">Niveaulegenda</label>
             {Object.entries(D).map(([l,d])=><div key={l} className="li">
@@ -369,7 +637,7 @@ function App() {
           <div className="empty-t">Plak een functieprofiel om te beginnen</div>
           <div style={{fontSize:10,color:"var(--muted)",textAlign:"center",maxWidth:300,lineHeight:1.6,marginTop:8}}>
             Stap 1 → Taken genereren & valideren<br/>
-            Stap 2 → ESCO-skills koppelen<br/>
+            Stap 2 → Lightcast skills koppelen<br/>
             Stap 3 → Definitieve skillset exporteren
           </div>
         </div>}
@@ -387,13 +655,18 @@ function App() {
           <div style={{padding:"10px 22px",background:"var(--surface)",borderBottom:"1px solid var(--border)",fontSize:10,color:"var(--muted)"}}>
             Vink de taken aan die van toepassing zijn. Klik daarna op <strong>Stap 2</strong> om ESCO-skills te koppelen.
           </div>
+          {bronnenStatus.length>0&&<div style={{padding:"8px 22px",background:"var(--surface)",borderBottom:"1px solid var(--border)",display:"flex",flexDirection:"column",gap:3}}>
+            {bronnenStatus.map((b,i)=><div key={i} style={{fontSize:10,color:b.ok?"#2d6a4f":"#9b2226",display:"flex",gap:6,alignItems:"center"}}>
+              <span>{b.ok?"✓":"⚠"}</span><span>{b.url}</span><span style={{opacity:.7}}>— {b.melding}</span>
+            </div>)}
+          </div>}
           <div className="tc"><div className="fi">
             {taken.map(t=><div key={t.id} className={`taak-row ${t.geselecteerd?"selected":""}`} onClick={()=>toggleTaak(t.id)}>
               <div className="taak-check">{t.geselecteerd&&<span style={{color:"white",fontSize:10}}>✓</span>}</div>
               <div className="taak-body">
                 <div className="taak-naam">{t.taak}</div>
                 <div className="taak-meta">
-                  {t.bron&&<span className="tbadge" style={{background:t.bron==="profiel"?"#e8f0fe":t.bron==="beroep"?"#fef3d0":"#f3e8ff",color:t.bron==="profiel"?"#1a56db":t.bron==="beroep"?"#7a5c00":"#6b21a8",borderColor:t.bron==="profiel"?"#93b4fd":t.bron==="beroep"?"#e8c96a":"#c084fc"}}>{t.bron==="profiel"?"📄 profiel":t.bron==="beroep"?"🔧 beroep":"🏢 bedrijf"}</span>}
+                  {t.bron&&<span className="tbadge" style={{background:t.bron==="profiel"?"#e8f0fe":t.bron==="beroep"?"#fef3d0":"#f3e8ff",color:t.bron==="profiel"?"#1a56db":t.bron==="beroep"?"#7a5c00":"#6b21a8",borderColor:t.bron==="profiel"?"#93b4fd":t.bron==="beroep"?"#e8c96a":"#c084fc"}}>{t.bron==="profiel"?"📄 profiel":t.bron==="beroep"?"🔧 beroep":t.bron==="bron"?"🔗 bron":"🏢 bedrijf"}</span>}
                   {t.frequentie&&<span className="tbadge" style={{background:"var(--bg)",color:"var(--muted)",borderColor:"var(--border)"}}>{t.frequentie}</span>}
                   {t.belang&&<span className="tbadge" style={{background:t.belang==="hoog"?"#fce4e4":t.belang==="middel"?"#fef3d0":"#d8f3dc",color:t.belang==="hoog"?"#9b2226":t.belang==="middel"?"#7a5c00":"#2d6a4f",borderColor:t.belang==="hoog"?"#e07070":t.belang==="middel"?"#e8c96a":"#74c69d"}}>belang: {t.belang}</span>}
                 </div>
@@ -449,7 +722,7 @@ function App() {
                               {s.skill}
                               {s.eigen&&<span className="eigen-badge">Eigen</span>}
                               {!s.eigen&&s.esco_matched&&s.esco_code&&<span className="esco-badge" title={s.esco_uri||''}>{s.esco_code}</span>}
-                              {!s.eigen&&!s.esco_matched&&<span className="no-esco">geen ESCO match</span>}
+                              {!s.eigen&&!s.esco_matched&&<span className="no-match">geen ESCO match</span>}
                               {changed&&<span className="was">(was: {s.niveau})</span>}
                               {s.esco_label&&s.esco_label!==s.skill&&<div style={{fontSize:9,color:"#1a56db",marginTop:1,opacity:.8}}>↳ {s.esco_label}</div>}
                               {s.toelichting&&<div style={{fontSize:9,color:"var(--muted)",marginTop:1}}>{s.toelichting}</div>}
@@ -477,8 +750,9 @@ function App() {
                             <div className="sk-name">
                               {s.softskill}
                               {s.esco_matched&&s.esco_code&&<span className="esco-badge">{s.esco_code}</span>}
-                              {!s.esco_matched&&<span className="no-esco">geen ESCO match</span>}
+                              {!s.esco_matched&&<span className="no-match">geen ESCO match</span>}
                               {changed&&<span className="was">(was: {s.niveau||"Gevorderd"})</span>}
+                              {s.esco_label&&s.esco_label!==s.skill&&<div style={{fontSize:9,color:"#1a56db",marginTop:1,opacity:.8}}>↳ {s.esco_label}</div>}
                               {s.toelichting&&<div style={{fontSize:9,color:"var(--muted)",marginTop:1}}>{s.toelichting}</div>}
                             </div>
                             <span className="sk-badge" style={{background:d.k,color:d.t,borderColor:d.b}}>{cur}</span>
@@ -518,10 +792,22 @@ function App() {
               <div className="counter">Hardskills: <strong>{selHard.length}</strong></div>
               <div className="counter">Softskills: <strong>{selSoft.length}</strong></div>
               <div className="counter" style={{fontWeight:600}}>Totaal: <strong>{selHard.length+selSoft.length}</strong></div>
-              {(selHard.length+selSoft.length)>0&&<button onClick={exportExcel}
-                style={{padding:"5px 14px",background:"#2d6a4f",color:"white",border:"none",fontFamily:"'Geist Mono',monospace",fontSize:10,letterSpacing:".1em",textTransform:"uppercase",cursor:"pointer",borderRadius:2,marginLeft:"auto"}}>
-                ↓ Export Excel
-              </button>}
+              {(selHard.length+selSoft.length)>0&&<div style={{display:"flex",gap:8,marginLeft:"auto"}}>
+                <button onClick={exportExcel}
+                  style={{padding:"5px 14px",background:"#2d6a4f",color:"white",border:"none",fontFamily:"'Geist Mono',monospace",fontSize:10,letterSpacing:".1em",textTransform:"uppercase",cursor:"pointer",borderRadius:2}}>
+                  ↓ Export Excel
+                </button>
+                <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
+                  <button onClick={exportWord}
+                    style={{padding:"5px 14px",background:"#1a56db",color:"white",border:"none",fontFamily:"'Geist Mono',monospace",fontSize:10,letterSpacing:".1em",textTransform:"uppercase",cursor:"pointer",borderRadius:2}}>
+                    ↓ Export Word
+                  </button>
+                  <label style={{display:"flex",alignItems:"center",gap:5,fontSize:9,color:"#1a56db",cursor:"pointer"}}>
+                    <input type="checkbox" checked={uitgebreid} onChange={e=>setUitgebreid(e.target.checked)} style={{cursor:"pointer"}}/>
+                    Uitgebreide functieomschrijving
+                  </label>
+                </div>
+              </div>}
             </div>
             <div style={{marginBottom:16}}>
               <div className="secl" style={{marginBottom:8}}>Hardskills — selecteer gewenste skills</div>
@@ -566,4 +852,3 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
 </body>
 </html>
- 
