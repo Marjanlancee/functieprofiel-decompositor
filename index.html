@@ -240,7 +240,6 @@ function App() {
 
   const exportWord = async () => {
     try {
-      // Wacht tot JSZip geladen is
       let tries = 0;
       while (typeof JSZip === 'undefined' && tries < 30) {
         await new Promise(r => setTimeout(r, 100));
@@ -254,78 +253,27 @@ function App() {
       const datum = new Date().toLocaleDateString('nl-NL');
       const jaar = new Date().getFullYear();
 
-      // Genereer uitgebreide functieomschrijving indien gewenst
+      // Uitgebreide omschrijving ophalen indien gewenst
       let uitgebreideOmschrijving = '';
       if (uitgebreid) {
         try {
           const bronLijst = bronnen.trim() ? bronnen.split('\n').filter(b=>b.trim()).join(', ') : '';
           const res = await fetch('/api/analyse', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              stap: 3,
-              functietitel,
-              functieprofiel: input,
-              samenvatting,
-              taken: geselecteerdeTaken,
-              skills: { hard: selHard, soft: selSoft },
-              bedrijf,
-              bronnen: bronLijst,
-            })
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stap: 3, functietitel, samenvatting, taken: geselecteerdeTaken, skills: { hard: selHard, soft: selSoft }, bedrijf, bronnenTekst: bronLijst })
           });
           const data = await res.json();
           if (data.omschrijving) uitgebreideOmschrijving = data.omschrijving;
-        } catch(e) {
-          console.error('Omschrijving genereren mislukt:', e);
-        }
+        } catch(e) { console.error('Omschrijving fout:', e); }
       }
+
       const skillsPerTaak = new Map();
       if (skillsData) (skillsData.taken||[]).forEach(t => skillsPerTaak.set(t.id, t));
       const geselecteerdeHardNames = new Set(selHard.map(s=>s.skill));
       const geselecteerdeSoftNames = new Set(selSoft.map(s=>s.softskill));
       const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
-      // ── Titelblok ──────────────────────────────────────────────────────────
-      const titelBlok = `
-  <w:p><w:pPr><w:pStyle w:val="Kop1"/><w:spacing w:before="0" w:after="120"/></w:pPr>
-    <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="40"/><w:color w:val="1F3864"/></w:rPr>
-      <w:t>Taakanalyse ESCO Skills</w:t></w:r></w:p>
-  <w:p><w:pPr><w:spacing w:before="0" w:after="80"/></w:pPr>
-    <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="28"/><w:color w:val="1F3864"/></w:rPr>
-      <w:t>${esc(functietitel)}</w:t></w:r></w:p>
-  <w:p><w:pPr><w:spacing w:before="0" w:after="80"/></w:pPr>
-    <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="20"/><w:color w:val="444444"/></w:rPr>
-      <w:t xml:space="preserve">Bedrijf: ${esc(bedrijf||'—')}     |     Datum: ${esc(datum)}     |     Bright Work Solutions</w:t></w:r></w:p>
-  <w:p><w:pPr><w:spacing w:before="0" w:after="200"/></w:pPr>
-    <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="22"/><w:i/><w:color w:val="555555"/></w:rPr>
-      <w:t>${esc(samenvatting||'')}</w:t></w:r></w:p>`;
-
-      // ── Uitgebreide omschrijving (optioneel) ──────────────────────────────
-      const omschrijvingBlok = uitgebreideOmschrijving ? uitgebreideOmschrijving.split('\n\n').map(alinea =>
-        `<w:p><w:pPr><w:spacing w:before="0" w:after="120"/></w:pPr>
-          <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="22"/></w:rPr>
-            <w:t xml:space="preserve">${alinea.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</w:t></w:r></w:p>`
-      ).join('') : '';
-
-      // ── Taken & Skills tabel ───────────────────────────────────────────────
-      let taakRijen = `
-    <w:tr>
-      <w:trPr><w:trHeight w:val="400"/></w:trPr>
-      <w:tc><w:tcPr><w:tcW w:w="700" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="1F3864"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
-        <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="18"/><w:color w:val="FFFFFF"/></w:rPr><w:t>Type</w:t></w:r></w:p></w:tc>
-      <w:tc><w:tcPr><w:tcW w:w="2000" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="1F3864"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
-        <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="18"/><w:color w:val="FFFFFF"/></w:rPr><w:t>Skill</w:t></w:r></w:p></w:tc>
-      <w:tc><w:tcPr><w:tcW w:w="1000" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="1F3864"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
-        <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="18"/><w:color w:val="FFFFFF"/></w:rPr><w:t>ESCO Code</w:t></w:r></w:p></w:tc>
-      <w:tc><w:tcPr><w:tcW w:w="700" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="1F3864"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
-        <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="18"/><w:color w:val="FFFFFF"/></w:rPr><w:t>Niveau</w:t></w:r></w:p></w:tc>
-      <w:tc><w:tcPr><w:tcW w:w="3500" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="1F3864"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
-        <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="18"/><w:color w:val="FFFFFF"/></w:rPr><w:t>Gekoppelde taken</w:t></w:r></w:p></w:tc>
-      <w:tc><w:tcPr><w:tcW w:w="1300" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="1F3864"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
-        <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="18"/><w:color w:val="FFFFFF"/></w:rPr><w:t>ESCO Definitie</w:t></w:r></w:p></w:tc>
-    </w:tr>`;
-
-      // Per skill - één rij, taken als lijst
+      // Bouw skill map: één rij per skill, taken als lijst
       const wordSkillMap = new Map();
       geselecteerdeTaken.forEach(taak => {
         const st = skillsPerTaak.get(taak.id);
@@ -343,10 +291,47 @@ function App() {
         });
       });
 
+      // Voorblad informatietabel
+      const infoRijen = [
+        ['Bedrijf', bedrijf||'—'],
+        ['Functietitel', functietitel],
+        ['Datum', datum],
+        ['Skills-taxonomie', 'ESCO — European Skills, Competences, Qualifications and Occupations'],
+        ['Aantal taken', String(geselecteerdeTaken.length)],
+        ['Hardskills', String(alleHardskills.length)],
+        ['Softskills', String(alleSoftskills.length)],
+        ['Geselecteerde skills', String(selHard.length + selSoft.length) + ' (' + selHard.length + ' hard, ' + selSoft.length + ' soft)'],
+        ['Ook bekend als', vergelijkbareTitels.join(', ')||'—'],
+      ].map((r, i) => `
+    <w:tr>
+      <w:tc><w:tcPr><w:tcW w:w="2800" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="${i%2===0?'E8EDF5':'F0F4FA'}"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
+        <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="20"/><w:color w:val="1F3864"/></w:rPr><w:t>${esc(r[0])}</w:t></w:r></w:p></w:tc>
+      <w:tc><w:tcPr><w:tcW w:w="6800" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="${i%2===0?'E8EDF5':'F0F4FA'}"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
+        <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="20"/></w:rPr><w:t xml:space="preserve">${esc(r[1])}</w:t></w:r></w:p></w:tc>
+    </w:tr>`).join('');
+
+      // Skillset tabel rijen
+      let skillRijen = `
+    <w:tr>
+      <w:trPr><w:trHeight w:val="400"/></w:trPr>
+      <w:tc><w:tcPr><w:tcW w:w="700" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="1F3864"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
+        <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="18"/><w:color w:val="FFFFFF"/></w:rPr><w:t>Type</w:t></w:r></w:p></w:tc>
+      <w:tc><w:tcPr><w:tcW w:w="2000" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="1F3864"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
+        <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="18"/><w:color w:val="FFFFFF"/></w:rPr><w:t>Skill</w:t></w:r></w:p></w:tc>
+      <w:tc><w:tcPr><w:tcW w:w="1000" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="1F3864"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
+        <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="18"/><w:color w:val="FFFFFF"/></w:rPr><w:t>ESCO Code</w:t></w:r></w:p></w:tc>
+      <w:tc><w:tcPr><w:tcW w:w="700" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="1F3864"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
+        <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="18"/><w:color w:val="FFFFFF"/></w:rPr><w:t>Niveau</w:t></w:r></w:p></w:tc>
+      <w:tc><w:tcPr><w:tcW w:w="3500" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="1F3864"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
+        <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="18"/><w:color w:val="FFFFFF"/></w:rPr><w:t>Gekoppelde taken</w:t></w:r></w:p></w:tc>
+      <w:tc><w:tcPr><w:tcW w:w="1300" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="1F3864"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
+        <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="18"/><w:color w:val="FFFFFF"/></w:rPr><w:t>ESCO Definitie</w:t></w:r></w:p></w:tc>
+    </w:tr>`;
+
       let ri = 0;
       wordSkillMap.forEach(s => {
         const fill = ri%2===0 ? 'EEF2F7' : 'FFFFFF';
-        taakRijen += `
+        skillRijen += `
     <w:tr>
       <w:tc><w:tcPr><w:tcW w:w="700" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="${fill}"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>
         <w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="18"/><w:color w:val="${s.type==='Hard'?'1F3864':'C4860A'}"/></w:rPr><w:t>${esc(s.type)}</w:t></w:r></w:p></w:tc>
@@ -366,23 +351,34 @@ function App() {
         ri++;
       });
 
+      // Uitgebreide omschrijving blok
+      const omschrijvingBlok = uitgebreideOmschrijving ? `
+  <w:p><w:pPr><w:spacing w:before="320" w:after="80"/></w:pPr>
+    <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="28"/><w:color w:val="1F3864"/></w:rPr>
+      <w:t>1. Functieoverzicht</w:t></w:r></w:p>
+  ${uitgebreideOmschrijving.split('\n\n').map(p => `<w:p><w:pPr><w:spacing w:before="0" w:after="120"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="22"/></w:rPr><w:t xml:space="preserve">${p.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</w:t></w:r></w:p>`).join('')}` : '';
 
+      const secNr = uitgebreideOmschrijving ? '2' : '1';
 
       const docXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
             xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
 <w:body>
+  <w:p><w:pPr><w:spacing w:before="0" w:after="80"/></w:pPr>
+    <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="52"/><w:color w:val="1F3864"/></w:rPr>
+      <w:t>Taakanalyse</w:t></w:r></w:p>
+  <w:p><w:pPr><w:spacing w:before="0" w:after="200"/></w:pPr>
+    <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="36"/><w:color w:val="2d6a4f"/></w:rPr>
+      <w:t>${esc(functietitel)}</w:t></w:r></w:p>
+  <w:p><w:pPr><w:spacing w:before="0" w:after="80"/></w:pPr>
+    <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="18"/><w:i/><w:color w:val="666666"/></w:rPr>
+      <w:t>Skills-based taakanalyse op basis van ESCO Skills Library</w:t></w:r></w:p>
 
-  ${titelBlok}
-  ${omschrijvingBlok}
-
-  <w:p><w:pPr><w:spacing w:before="240" w:after="80"/></w:pPr>
-    <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="28"/><w:color w:val="1F3864"/></w:rPr>
-      <w:t>1. Taken en bijbehorende skills</w:t></w:r></w:p>
+  <w:p><w:pPr><w:spacing w:before="240" w:after="120"/></w:pPr></w:p>
 
   <w:tbl>
     <w:tblPr>
-      <w:tblW w:w="9100" w:type="dxa"/>
+      <w:tblW w:w="9600" w:type="dxa"/>
       <w:tblBorders>
         <w:top w:val="single" w:sz="4" w:space="0" w:color="C8D4E8"/>
         <w:left w:val="single" w:sz="4" w:space="0" w:color="C8D4E8"/>
@@ -391,18 +387,40 @@ function App() {
         <w:insideH w:val="single" w:sz="4" w:space="0" w:color="C8D4E8"/>
         <w:insideV w:val="single" w:sz="4" w:space="0" w:color="C8D4E8"/>
       </w:tblBorders>
-      <w:tblCellMar><w:top w:w="0" w:type="dxa"/><w:left w:w="0" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="0" w:type="dxa"/></w:tblCellMar>
+    </w:tblPr>
+    <w:tblGrid><w:gridCol w:w="2800"/><w:gridCol w:w="6800"/></w:tblGrid>
+    ${infoRijen}
+  </w:tbl>
+
+  ${omschrijvingBlok}
+
+  <w:p><w:pPr><w:spacing w:before="320" w:after="80"/></w:pPr>
+    <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="28"/><w:color w:val="1F3864"/></w:rPr>
+      <w:t>${secNr}. Skillset per taak</w:t></w:r></w:p>
+
+  <w:tbl>
+    <w:tblPr>
+      <w:tblW w:w="9200" w:type="dxa"/>
+      <w:tblBorders>
+        <w:top w:val="single" w:sz="4" w:space="0" w:color="C8D4E8"/>
+        <w:left w:val="single" w:sz="4" w:space="0" w:color="C8D4E8"/>
+        <w:bottom w:val="single" w:sz="4" w:space="0" w:color="C8D4E8"/>
+        <w:right w:val="single" w:sz="4" w:space="0" w:color="C8D4E8"/>
+        <w:insideH w:val="single" w:sz="4" w:space="0" w:color="C8D4E8"/>
+        <w:insideV w:val="single" w:sz="4" w:space="0" w:color="C8D4E8"/>
+      </w:tblBorders>
     </w:tblPr>
     <w:tblGrid>
-      <w:gridCol w:w="700"/><w:gridCol w:w="2000"/><w:gridCol w:w="1000"/>
-      <w:gridCol w:w="700"/><w:gridCol w:w="3500"/><w:gridCol w:w="1300"/>
+      <w:gridCol w:w="700"/><w:gridCol w:w="2000"/>
+      <w:gridCol w:w="1000"/><w:gridCol w:w="700"/>
+      <w:gridCol w:w="3500"/><w:gridCol w:w="1300"/>
     </w:tblGrid>
-    ${taakRijen}
+    ${skillRijen}
   </w:tbl>
 
   <w:p><w:pPr><w:spacing w:before="320" w:after="80"/></w:pPr>
     <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="28"/><w:color w:val="1F3864"/></w:rPr>
-      <w:t>2. Geraadpleegde bronnen</w:t></w:r></w:p>
+      <w:t>${parseInt(secNr)+1}. Geraadpleegde bronnen</w:t></w:r></w:p>
   <w:p><w:pPr><w:spacing w:before="0" w:after="80"/></w:pPr>
     <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="20"/></w:rPr>
       <w:t>ESCO database. (${jaar}). European Skills, Competences, Qualifications and Occupations. Geraadpleegd op ${esc(datum)}, van https://esco.ec.europa.eu</w:t></w:r></w:p>
@@ -431,12 +449,6 @@ function App() {
     <w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>
     <w:sz w:val="22"/><w:lang w:val="nl-NL"/>
   </w:rPr></w:rPrDefault></w:docDefaults>
-  <w:style w:type="paragraph" w:styleId="Normal"><w:name w:val="Normal"/>
-    <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="22"/></w:rPr></w:style>
-  <w:style w:type="paragraph" w:styleId="Kop1"><w:name w:val="heading 1"/>
-    <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="40"/><w:color w:val="1F3864"/></w:rPr></w:style>
-  <w:style w:type="paragraph" w:styleId="Kop2"><w:name w:val="heading 2"/>
-    <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="28"/><w:color w:val="1F3864"/></w:rPr></w:style>
 </w:styles>`;
 
       const zip = new JSZip();
@@ -450,7 +462,7 @@ function App() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `Taakanalyse_${(bedrijf||'').replace(/\s/g,'_')}_${functietitel.replace(/\s/g,'_')}_${datum.replace(/\//g,'-')}.docx`;
+      a.download = `Taakanalyse_ESCO_${(bedrijf||'').replace(/\s/g,'_')}_${functietitel.replace(/\s/g,'_')}_${datum.replace(/\//g,'-')}.docx`;
       a.click();
       URL.revokeObjectURL(url);
 
@@ -464,69 +476,78 @@ function App() {
     const wb = XLSX.utils.book_new();
     const datum = new Date().toLocaleDateString('nl-NL');
 
-    // ── Tabblad 1: Functieprofiel Skillset ──────────────────────────────────
-    const rows = [
-      [`Bedrijf: ${bedrijf||'-'}`,'','','','','','','','','',''],
-      [`Functie: ${functietitel}`,'','','','','','','','','',''],
-      [`Datum: ${datum}`,'','','','','','','','','',''],
-      ['','','','','','','','','','',''],
-      ['Nr','Taak','Type','Skill','ESCO Label','ESCO Definitie','ESCO URI','Niveau','Bron','Frequentie','Belang']
-    ];
+    // Bouw skill map: één rij per skill met alle gekoppelde taken
     const skillsPerTaak = new Map();
-    if (skillsData) (skillsData.taken||[]).forEach(t => skillsPerTaak.set(t.id,t));
-    // Alleen geselecteerde skills exporteren
+    if (skillsData) (skillsData.taken||[]).forEach(t => skillsPerTaak.set(t.id, t));
     const geselecteerdeHardNames = new Set(selHard.map(s=>s.skill));
     const geselecteerdeSoftNames = new Set(selSoft.map(s=>s.softskill));
+
+    const skillTaakMap = new Map();
     geselecteerdeTaken.forEach(taak => {
       const st = skillsPerTaak.get(taak.id);
       const hs = st ? (st.hardskills||[]).filter(s=>geselecteerdeHardNames.has(s.skill)) : [];
       const ss = st ? (st.softskills||[]).filter(s=>geselecteerdeSoftNames.has(s.softskill)) : [];
-      const all = [
-        ...hs.map(s=>({...s,type:'Hard',naam:s.skill,niveau:getNiveau(taak.id,s.skill,s.niveau)})),
-        ...ss.map(s=>({...s,type:'Soft',naam:s.softskill,niveau:getNiveau(taak.id,`soft-${s.softskill}`,s.niveau||'Gevorderd')}))
-      ];
-      if (all.length===0) return;
-      all.forEach((s,i) => rows.push([
-        i===0?taak.id:'', i===0?taak.taak:'',
-        s.type, s.naam,
-        s.naam_en||'',
+      hs.forEach(s => {
+        const key = 'h-' + s.skill;
+        if (!skillTaakMap.has(key)) skillTaakMap.set(key, { type:'Hard', naam:s.skill, niveau:getNiveau(taak.id,s.skill,s.niveau), esco_definitie:s.esco_definitie||'', esco_uri:s.esco_uri||'', bron:taak.bron, frequentie:taak.frequentie, belang:taak.belang, taken:[] });
+        skillTaakMap.get(key).taken.push(taak.taak);
+      });
+      ss.forEach(s => {
+        const key = 's-' + s.softskill;
+        if (!skillTaakMap.has(key)) skillTaakMap.set(key, { type:'Soft', naam:s.softskill, niveau:getNiveau(taak.id,`soft-${s.softskill}`,s.niveau||'Gevorderd'), esco_definitie:s.esco_definitie||'', esco_uri:s.esco_uri||'', bron:taak.bron, frequentie:taak.frequentie, belang:taak.belang, taken:[] });
+        skillTaakMap.get(key).taken.push(taak.taak);
+      });
+    });
+
+    const rows = [
+      [`Bedrijf: ${bedrijf||'-'}`, '', '', '', '', '', '', '', ''],
+      [`Functie: ${functietitel}`, '', '', '', '', '', '', '', ''],
+      [`Datum: ${datum}`, '', '', '', '', '', '', '', ''],
+      ['', '', '', '', '', '', '', '', ''],
+      ['Type', 'Skill', 'Niveau', 'Gekoppelde taken', 'ESCO Definitie', 'ESCO URI', 'Bron', 'Frequentie', 'Belang']
+    ];
+
+    skillTaakMap.forEach(s => {
+      rows.push([
+        s.type,
+        s.naam,
+        s.niveau,
+        s.taken.join(' | '),
         s.esco_definitie||'',
         s.esco_uri||'',
-        s.niveau,
-        i===0?taak.bron:'', i===0?taak.frequentie:'', i===0?taak.belang:''
-      ]));
+        s.bron||'',
+        s.frequentie||'',
+        s.belang||'',
+      ]);
     });
+
     const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws['!cols'] = [{wch:4},{wch:45},{wch:6},{wch:35},{wch:35},{wch:55},{wch:60},{wch:12},{wch:10},{wch:12},{wch:8}];
+    ws['!cols'] = [{wch:8},{wch:35},{wch:12},{wch:80},{wch:55},{wch:60},{wch:10},{wch:12},{wch:8}];
     XLSX.utils.book_append_sheet(wb, ws, 'Functieprofiel Skillset');
 
-    // ── Tabblad 2: Methodiek ────────────────────────────────────────────────
+    // Methodiek tabblad
     const meta = [
-      ['METHODIEK — Taakanalyse Skills ESCO',''],
-      ['Bright Work Solutions',''],
-      ['',''],
-      ['ONDERDEEL','TOELICHTING'],
-      ['Taken — hoe bepaald?','Claude analyseert het functieprofiel en combineert drie bronnen: (1) taken expliciet vermeld in het ingevoerde profiel, (2) standaardtaken die bij het beroep horen op basis van trainingsdata (beroepsliteratuur, functieomschrijvingen, sectorkennis), (3) taken passend bij de bedrijfscontext indien opgegeven.'],
-      ['Frequentie (dagelijks / wekelijks / maandelijks)','Claude schat de frequentie op basis van de aard van de taak. Operationele uitvoeringstaken zijn doorgaans dagelijks, coördinatie- en overlegtaken wekelijks, strategische of rapportagetaken maandelijks. Dit is een modelschatting, geen vaste norm.'],
-      ['Bron van beroepen en sectoren','Trainingsdata van Claude — bestaande uit functieomschrijvingen, cao-teksten, beroepsgidsen, sectorrapportages en internationale arbeidsmarktbronnen zoals O*NET (VS) en ISCO (ILO). De tool combineert het ingevoerde profiel met deze achtergrondkennis.'],
-      ['Skills — databron','Alle skills komen uit de officiële ESCO-database (European Skills, Competences, Qualifications and Occupations) van de Europese Commissie, versie 1.2, Nederlands. Zie: https://esco.ec.europa.eu'],
-      ['Skills — selectie (max. 300 per analyse)','Uit de ESCO-database van ca. 14.000 skills worden per analyse de 300 meest relevante geselecteerd op basis van woordoverlap met de functietitel en de gegenereerde taken.'],
-      ['ESCO Definitie','De definities komen rechtstreeks uit de officiële ESCO-datadump (veld: description). Dit zijn de originele Nederlandse ESCO-beschrijvingen.'],
-      ['ESCO URI','De ESCO URI is de unieke, permanente identifier van elke skill in de Europese database. Via deze URI is de skill opzoekbaar op het ESCO-portaal (https://esco.ec.europa.eu).'],
-      ['Ook bekend als (vergelijkbare titels)','Gangbare synoniemen en functietitelvarianten gegenereerd door Claude op basis van trainingsdata (functieomschrijvingen, arbeidsmarktliteratuur). Dit zijn modelinschattingen van verwante titels — geen gestandaardiseerde bron.'],
-      ['Niveaus (Basis / Gevorderd / Expert)','Claude schat het vereiste niveau per skill per taak in op basis van de taakomschrijving en de context van het profiel. De gebruiker kan niveaus aanpassen via sliders in stap 2. Basis = uitvoerend, onder begeleiding; Gevorderd = zelfstandig, ook complexe situaties; Expert = strategisch, begeleidt anderen.'],
-      ['Bedrijfseigen termen','Termen die de gebruiker zelf invoert als bedrijfsspecifieke competenties of kernwaarden. Deze worden niet gematcht op ESCO, maar als eigen skill toegevoegd aan de skillset. Herkenbaar via het paarse "Bedrijf"-label.'],
-      ['',''],
-      ['BRONVERMELDING',''],
-      ['ESCO database','https://esco.ec.europa.eu/nl'],
-      ['O*NET Online (referentie)','https://www.onetonline.org'],
-      ['ISCO-08 (referentie)','https://www.ilo.org/ilostat-files/ISCO/newdocs-08-2012/ISCO-08-EN.pdf'],
+      ['METHODIEK — Taakanalyse Skills ESCO', ''],
+      ['Bright Work Solutions', ''],
+      ['', ''],
+      ['ONDERDEEL', 'TOELICHTING'],
+      ['Taken — hoe bepaald?', 'Claude analyseert het functieprofiel en combineert drie bronnen: (1) taken expliciet vermeld in het ingevoerde profiel, (2) standaardtaken die bij het beroep horen op basis van trainingsdata, (3) taken passend bij de bedrijfscontext indien opgegeven.'],
+      ['Skills — databron', 'Alle skills komen uit de officiële ESCO-database (European Skills, Competences, Qualifications and Occupations) van de Europese Commissie, versie 1.2, Nederlands. Zie: https://esco.ec.europa.eu'],
+      ['Skills — selectie (max. 300 per analyse)', 'Uit de ESCO-database van ca. 14.000 skills worden per analyse de 300 meest relevante geselecteerd op basis van woordoverlap met de functietitel en de gegenereerde taken.'],
+      ['ESCO Definitie', 'De definities komen rechtstreeks uit de officiële ESCO-datadump. Dit zijn de originele Nederlandse ESCO-beschrijvingen.'],
+      ['ESCO URI', 'De ESCO URI is de unieke, permanente identifier van elke skill in de Europese database. Via deze URI is de skill opzoekbaar op het ESCO-portaal (https://esco.ec.europa.eu).'],
+      ['Niveaus (Basis / Gevorderd / Expert)', 'Basis = uitvoerend, onder begeleiding; Gevorderd = zelfstandig, ook complexe situaties; Expert = strategisch, begeleidt anderen.'],
+      ['', ''],
+      ['BRONVERMELDING', ''],
+      ['ESCO database', 'https://esco.ec.europa.eu/nl'],
+      ['O*NET Online (referentie)', 'https://www.onetonline.org'],
+      ['ISCO-08 (referentie)', 'https://www.ilo.org/ilostat-files/ISCO/newdocs-08-2012/ISCO-08-EN.pdf'],
     ];
     const wsMeta = XLSX.utils.aoa_to_sheet(meta);
     wsMeta['!cols'] = [{wch:35},{wch:90}];
     XLSX.utils.book_append_sheet(wb, wsMeta, 'Methodiek');
 
-    XLSX.writeFile(wb,`Skillset_ESCO_${bedrijf?bedrijf.replace(/\s/g,'_')+'_':''}${functietitel.replace(/\s/g,'_')}_${datum.replace(/\//g,'-')}.xlsx`);
+    XLSX.writeFile(wb, `Skillset_ESCO_${bedrijf?bedrijf.replace(/\s/g,'_')+'_':''}${functietitel.replace(/\s/g,'_')}_${datum.replace(/\//g,'-')}.xlsx`);
   };
 
   const D = NIVEAU;
